@@ -18,7 +18,7 @@ jobs:
       - run: dotnet build -c Release src/SmartEdit.Mcp/SmartEdit.Mcp.csproj
       - run: dotnet run -c Release --no-build --project src/SmartEdit.Mcp/SmartEdit.Mcp.csproj -- selftest
 
-  # По тегу v*: publish + zip + draft release с ассетом (публикует человек после осмотра)
+  # По тегу v*: publish (framework-dependent + self-contained) + zips + draft release (публикует человек)
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build-test
@@ -31,14 +31,32 @@ jobs:
         with:
           dotnet-version: 10.x
       - run: dotnet publish -c Release -r win-x64 -o win-x64/publish src/SmartEdit.Mcp/SmartEdit.Mcp.csproj
-      - name: zip asset
-        run: |
-          $zip = "win-x64/SmartEdit-win-x64-$env:GITHUB_REF_NAME.zip"
-          Compress-Archive -Path win-x64/publish/SmartEdit.Mcp.exe -DestinationPath $zip -Force
-          Get-Item $zip
-      - name: draft release with asset
+      - run: dotnet publish -c Release -r win-x64 -p:SelfContained=true -o win-x64/publish-sc src/SmartEdit.Mcp/SmartEdit.Mcp.csproj
+      - name: selftest gate on the self-contained binary
+        run: win-x64/publish-sc/SmartEdit.Mcp.exe selftest
+      - name: zip assets
         run: |
           $tag = $env:GITHUB_REF_NAME
-          gh release create $tag --draft --generate-notes "win-x64/SmartEdit-win-x64-$tag.zip"
+          Compress-Archive -Path win-x64/publish/SmartEdit.Mcp.exe -DestinationPath "win-x64/SmartEdit-win-x64-$tag.zip" -Force
+          Compress-Archive -Path win-x64/publish-sc/SmartEdit.Mcp.exe -DestinationPath "win-x64/SmartEdit-sc-win-x64-$tag.zip" -Force
+          Get-Item win-x64/*.zip
+      - name: draft release with assets
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          gh release create $tag --draft --generate-notes "win-x64/SmartEdit-win-x64-$tag.zip" "win-x64/SmartEdit-sc-win-x64-$tag.zip"
         env:
           GH_TOKEN: ${{ github.token }}
+
+  # AOT-эксперимент (#7): линкер MSVC есть на runner'е — пробуем собрать и прогнать selftest.
+  # Не блокирует релиз; зелёный результат = прикрепим ассетом в следующей итерации.
+  aot-experiment:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.x
+      - run: dotnet publish -c Release -r win-x64 -p:PublishAot=true -o win-x64/publish-aot src/SmartEdit.Mcp/SmartEdit.Mcp.csproj
+      - run: win-x64/publish-aot/SmartEdit.Mcp.exe selftest

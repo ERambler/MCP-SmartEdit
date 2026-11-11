@@ -1,6 +1,7 @@
 # SmartEdit MCP installer (agent-friendly, idempotent)
 # Downloads the latest release into %LOCALAPPDATA%\SmartEdit\bin, runs the selftest,
-# prints ready-to-paste MCP client configs. Requires .NET 10 runtime (checked).
+# prints ready-to-paste MCP client configs. Picks the self-contained build when no
+# .NET 10 runtime is present (no runtime install needed).
 # Usage:  irm https://raw.githubusercontent.com/ERambler/MCP-SmartEdit/main/install/install.ps1 | iex
 $ErrorActionPreference = 'Stop'
 $repo  = 'ERambler/MCP-SmartEdit'
@@ -9,20 +10,29 @@ $zip   = Join-Path $env:TEMP 'smartedit-release.zip'
 
 Write-Host "== SmartEdit MCP installer ==" -ForegroundColor Cyan
 
-# 0) .NET 10 runtime check
+# 0) .NET 10 runtime check → выбор ассета: self-contained без рантайма, framework-dependent с ним
+$sc = $false
 try { $null = & dotnet --list-runtimes 2>$null | Select-String 'Microsoft.NETCore.App.* 10\.' }
 catch {}
 if (-not $?) {
-    Write-Host "ERROR: .NET 10 runtime not found. Install it first:" -ForegroundColor Red
-    Write-Host "  https://dotnet.microsoft.com/download/dotnet/10.0" -ForegroundColor Yellow
-    exit 1
+    $sc = $true
+    Write-Host ".NET 10 runtime not found - using the self-contained build (no runtime needed)" -ForegroundColor Yellow
 }
 
-# 1) latest release asset (win-x64 zip)
+# 1) latest release asset (win-x64 zip; sc-вариант для машин без рантайма)
 $rel = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest"
-$asset = $rel.assets | Where-Object { $_.name -like 'SmartEdit-win-x64-*.zip' } | Select-Object -First 1
-if (-not $asset) { Write-Host "ERROR: no win-x64 asset in latest release ($($rel.tag_name))" -ForegroundColor Red; exit 1 }
-Write-Host "Downloading $($asset.name) ($([math]::Round($asset.size/1KB)) KB) ..."
+$pattern = if ($sc) { 'SmartEdit-sc-win-x64-*.zip' } else { 'SmartEdit-win-x64-*.zip' }
+$asset = $rel.assets | Where-Object { $_.name -like $pattern } | Select-Object -First 1
+if (-not $asset) {
+    if ($sc) {
+        Write-Host "ERROR: latest release ($($rel.tag_name)) has no self-contained asset and .NET 10 runtime is not installed." -ForegroundColor Red
+        Write-Host "  Install the runtime: https://dotnet.microsoft.com/download/dotnet/10.0" -ForegroundColor Yellow
+    } else {
+        Write-Host "ERROR: no win-x64 asset in latest release ($($rel.tag_name))" -ForegroundColor Red
+    }
+    exit 1
+}
+Write-Host "Downloading $($asset.name) ($([math::Round($asset.size/1KB)) KB) ..."
 
 # 2) unzip (kill a running server first — the exe is locked while in use)
 Get-Process SmartEdit.Mcp -ErrorAction SilentlyContinue | Stop-Process -Force

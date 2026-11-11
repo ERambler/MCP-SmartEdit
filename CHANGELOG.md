@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.6.3 (2026-11-11)
+
+- **Self-contained asset** (#7): every release now ships `SmartEdit-sc-win-x64-vX.Y.Z.zip` (~85 MB single exe, no .NET runtime needed) alongside the framework-dependent one. `install.ps1` picks it automatically when no .NET 10 runtime is present — no more hard failure on runtime-less machines. The SC binary runs the full selftest gate in CI before release
+- **AOT experiment** (#7): CI gains a non-blocking `aot-experiment` job (tag builds) that compiles Native AOT on the runner's MSVC linker and runs selftest — result feeds the decision to ship an AOT asset
+
 ## v0.6.2 (2026-11-11)
 
 - **Code outline in the `open` response** (#2): opening a code file (C#, Python, JS/TS, Java, C/C++, markup) of ≤5000 lines now returns `code_outline` — the top 50 symbols (kind/name/line) — and warms the symbols cache (recomputed only on rev change). Kills the separate exploratory `symbols` call that telemetry showed agents skipping (3 uses / 86 opens). Non-code and oversized files omit the field. Selftested (symbols present, non-code null, >5k gate)
