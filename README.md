@@ -51,7 +51,7 @@ One shared document per file path: every editor sees one piece table and one rev
 
 ### 6. Zero-ritual operability
 - **`log`** — the shared journal of *all* sessions and processes (every call, every error kind, per-pid, rotated at 5 MB) the agent can grep to retrace its own steps. Test traffic is isolated to a temp dir — the journal reflects real usage only.
-- **Update check** — on startup the server asks GitHub (background, never blocks stdio); a native dialog with release notes; **OK silently installs** the update in place; **Cancel** never nags about that version again. Flavor-preserving: framework-dependent updates to fd, self-contained to sc.
+- **Update check** — on startup the server asks GitHub (background, never blocks stdio); a native dialog with release notes; **OK silently installs** the update in place; **Cancel** never nags about that version again.
 - **`calc`** — exact arithmetic (hex/bin/`^`/`!`/functions); LLMs should not do mental math.
 
 ### Also on board
