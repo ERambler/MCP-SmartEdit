@@ -2,7 +2,7 @@
 
 **Line-based text editor for LLM agents.** A zero-dependency [Model Context Protocol](https://modelcontextprotocol.io) stdio server that lets coding agents edit files by **line numbers** — no byte-exact `old_string` to drift out of sync, no whole files loaded into context. Works with any MCP client: **ZCode, Claude Desktop, Cursor, Windsurf, Cline** and anything else that speaks stdio MCP.
 
-[![Version](https://img.shields.io/badge/version-v0.5.2-blue)](https://github.com/ERambler/MCP-SmartEdit/releases)
+[![Version](https://img.shields.io/badge/version-v0.5.3-blue)](https://github.com/ERambler/MCP-SmartEdit/releases)
 [![.NET](https://img.shields.io/badge/.NET-10-purple)](https://dotnet.microsoft.com/download/dotnet/10.0)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-stdio%20server-orange)](https://modelcontextprotocol.io)
@@ -127,7 +127,7 @@ The server speaks standard MCP (initialize / tools/list / tools/call) over stdio
 | Variable | Effect |
 |---|---|
 | `SMARTEDIT_DATA_DIR` | data dir (default `%LOCALAPPDATA%\SmartEdit`); the shared journal `mcp.log` lives there |
-| `SMARTEDIT_LOG=debug` | verbose protocol logging (⚠ raw JSON-RPC incl. file payloads goes to the shared journal) |
+| `SMARTEDIT_LOG=debug` | verbose protocol logging (method/id/size only — tool-call payloads never enter the journal) |
 | `SMARTEDIT_TELEMETRY=off` | disable telemetry (`tool … → ok` lines with args summary); `0`/`false` also accepted. Errors keep being logged — that's diagnostics, not telemetry |
 
 ## The 60-second tour
@@ -167,7 +167,7 @@ Every mutation response carries: new `rev`, unified `diff`, bracket problems, an
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md). Highlights: v0.2 structure vision -> v0.3 batch/anchors/JSON errors -> v0.4 multi-agent collaboration -> v0.5 undo/goto/shared log + telemetry v2 -> v0.5.1 UTF-8 boundary fix -> v0.5.2 log-injection hardening + telemetry opt-out.
+See [CHANGELOG.md](CHANGELOG.md). Highlights: v0.2 structure vision -> v0.3 batch/anchors/JSON errors -> v0.4 multi-agent collaboration -> v0.5 undo/goto/shared log + telemetry v2 -> v0.5.1 UTF-8 boundary fix -> v0.5.2 log-injection hardening + telemetry opt-out -> v0.5.3 debug-payload masking.
 
 ## Roadmap & TODO
 

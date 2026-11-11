@@ -11,7 +11,7 @@ namespace SmartEdit.Mcp.Infra;
 /// </summary>
 public static class Log {
     static readonly object Gate = new();
-    static readonly bool DebugEnabled = Environment.GetEnvironmentVariable("SMARTEDIT_LOG") == "debug";
+    public static bool DebugEnabled { get; } = Environment.GetEnvironmentVariable("SMARTEDIT_LOG") == "debug";
     static readonly StreamWriter Stderr = new(Console.OpenStandardError(), Encoding.UTF8) { AutoFlush = true };
     static readonly Mutex Interprocess = new(false, @"Global\SmartEdit-Log");
     static readonly int Pid = Environment.ProcessId;

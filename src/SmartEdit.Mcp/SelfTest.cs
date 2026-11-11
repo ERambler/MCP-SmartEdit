@@ -41,6 +41,7 @@ public static class SelfTest {
         V05Features.LogHandle();
         V05Nav.UndoAndGoto(dir);
         V051Detect.Utf8BoundaryCyrillic(dir);
+        V053Security.DebugBrief();
         V03Features.BatchAndAnchors(dir);
         await V03Features.StructuredErrorsAsync(dir);
         V03Features.ReplaceAllTests(dir);
@@ -741,6 +742,21 @@ static class V05Features {
     static LogResult CallLog(ToolRegistry tools, string argsJson) {
         var json = tools.CallAsync("log", JsonDocument.Parse(argsJson).RootElement.Clone(), default).GetAwaiter().GetResult();
         return JsonSerializer.Deserialize<LogResult>(json, RpcJson.Default.LogResult)!;
+    }
+}
+
+/// <summary>v0.5.3: F4 — debug-лог протокола маскирует payload (аргументы tools/call несут секреты).</summary>
+static class V053Security {
+    public static void DebugBrief() {
+        var brief = JsonRpcServer.Brief(
+            """{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"replace_lines","arguments":{"new_text":"SECRET password=hunter2"}}}""");
+        SelfTest.CheckPublic(
+            brief.Contains("id=7") && brief.Contains("method=tools/call") && brief.Contains("len=")
+                && !brief.Contains("SECRET") && !brief.Contains("hunter2"),
+            "debug-brief: payload аргументов (секреты) не попадает в подпись строки протокола");
+        var bad = JsonRpcServer.Brief("not json — raw token=abc123");
+        SelfTest.CheckPublic(bad.Contains("unparsable") && !bad.Contains("abc123"),
+            "debug-brief: непарсируемая строка помечена, содержимое не пишется");
     }
 }
 

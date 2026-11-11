@@ -28,7 +28,7 @@ public sealed class JsonRpcServer(McpProtocolHandler handler) {
             catch (IOException) { break; }
             if (line is null) break; // EOF — клиент ушёл
             if (line.Length == 0) continue;
-            Log.Debug($"← {line}");
+            if (Log.DebugEnabled) Log.Debug(Brief(line)); // F4: payload аргументов — никогда в журнал
             Interlocked.Increment(ref _pending);
             _ = Task.Run(async () => {
                 try { await HandleLineAsync(line); }
@@ -64,6 +64,25 @@ public sealed class JsonRpcServer(McpProtocolHandler handler) {
                 Write(new RpcResponse { Id = req.Id, Error = new() { Code = -32603, Message = "Internal error" } });
         }
     }
+    /// <summary>
+    /// F4 (утечка секретов): сырая строка JSON-RPC несёт аргументы tools/call — содержимое файлов,
+    /// тексты правок, заметки, потенциально логины/токены. Общий журнал читается инструментом log
+    /// из любых чатов/проектов, поэтому в debug пишем только метод/id/размер — payload не касается журнала никогда.
+    /// </summary>
+    internal static string Brief(string line) {
+        string id = "-", method = "?";
+        try {
+            using var doc = JsonDocument.Parse(line);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("method", out var m) && m.ValueKind == JsonValueKind.String) method = Cut(m.GetString()!);
+            if (root.TryGetProperty("id", out var i))
+                id = i.ValueKind == JsonValueKind.String ? Cut(i.GetString()!) : i.ToString();
+        }
+        catch (JsonException) { method = "unparsable"; }
+        return $"← id={id} method={method} len={line.Length}";
+    }
+
+    static string Cut(string s) => s.Length <= 64 ? s : s[..64] + "…";
 
     static readonly StreamWriter Stdout = new(Console.OpenStandardOutput(), new UTF8Encoding(false)) {
         AutoFlush = true,

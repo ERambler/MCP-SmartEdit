@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.5.3 (2026-11-11)
+
+- **Security**: `SMARTEDIT_LOG=debug` no longer writes raw JSON-RPC lines into the shared journal — tool-call arguments (file contents, edit texts, notes — potentially logins/tokens) were landing in the machine-wide `mcp.log`, readable via the `log` tool from any chat/project. Debug lines now carry method/id/length only (`← id=7 method=tools/call len=15234`); payloads never enter the journal. Selftested (`debug-brief …`)
+
 ## v0.5.2 (2026-11-11)
 
 - **Security**: log injection (log forging) fixed — `Log.Write` now escapes `\r`/`\n`/`\t`, ANSI ESC and other control chars (plus U+2028/2029) in every message; one journal entry is exactly one line. Client-controlled data reaches the journal via tool names, `path` file-name parts (`Path.GetFileName` does not strip `\n`), `session_id`s, and exception texts — a raw newline there could forge entries that the `log` tool later shows to agents in *other* chats/projects (the journal is machine-wide shared). Covered by a selftest (`log: sanitize … log forging impossible`); unhandled-exception logging switched from `{ex}` (multi-line stack) to `ex.Message`
