@@ -72,6 +72,14 @@ public sealed class MutationResult {
     public string[]? Brackets { get; set; } // проблемы баланса {}[]() после правки (null — не код/сухой прогон)
     public bool Recovered { get; set; }              // v0.7 (#1): применено после auto-recovery из stale_rev
     public string[]? Intervening { get; set; }       // что меняли чужие правки, пока твой rev устарел
+    public DiagDto[]? Diagnostics { get; set; }      // v0.8: структурные якоря (line/code/message), null = чисто
+}
+
+/// <summary>Структурная диагностика в ответе правки: якорная строка + машинный код + текст.</summary>
+public sealed class DiagDto {
+    public int Line { get; set; }
+    public string Code { get; set; } = "";
+    public string Message { get; set; } = "";
 }
 
 public sealed class SaveResult {
@@ -180,6 +188,7 @@ public sealed class BatchResult {
     public string[]? Brackets { get; set; }
     public bool Recovered { get; set; }          // v0.7 (#1)
     public string[]? Intervening { get; set; }   // v0.7 (#1)
+    public DiagDto[]? Diagnostics { get; set; }  // v0.8
 }
 
 public sealed class ReplaceAllResult {

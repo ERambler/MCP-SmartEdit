@@ -47,6 +47,7 @@ public static class SelfTest {
         V070Stale.Run(dir);
         V072SaveTorture.Run(dir);
         V073Harden.Run(dir);
+        V080Literals.Run(dir);
         V03Features.BatchAndAnchors(dir);
         await V03Features.StructuredErrorsAsync(dir);
         V03Features.ReplaceAllTests(dir);
@@ -660,7 +661,7 @@ static class V03Features {
 
         (res, err) = await h.HandleAsync(new RpcRequest {
             Method = "tools/call", Id = J("2"),
-            Params = J($"{{\"name\":\"replace_lines\",\"arguments\":{{\"session_id\":\"{sid}\",\"start\":1,\"end\":1,\"new_text\":\"z\",\"expected_rev\":42}}}}"),
+            Params = J($"{{\"name\":\"replace_lines\",\"arguments\":{{\"session_id\":\"{sid}\",\"start\":1,\"end\":1,\"new_text\":\"z\",\"expected_rev\":42,\"retry_on_stale\":false}}}}"),
         });
         SelfTest.Check(err is null && res!.Value.GetProperty("isError").GetBoolean(), "errors: isError=true");
         var payload = JsonSerializer.Deserialize<ToolErrorPayload>(
@@ -703,7 +704,7 @@ static class V04Features {
 
         // правка от первого → у второго stale_rev называет виновника; show доносит события
         Mut(tools, o1.SessionId, 2, 2, "B!");
-        var mutErr = CallErr(tools, "replace_lines", $$"""{"session_id":"{{o2.SessionId}}","start":1,"end":1,"new_text":"x","expected_rev":0}""");
+        var mutErr = CallErr(tools, "replace_lines", $$"""{"session_id":"{{o2.SessionId}}","start":1,"end":1,"new_text":"x","expected_rev":0,"retry_on_stale":false}""");
         SelfTest.CheckPublic(mutErr?.Kind == "stale_rev" && (mutErr.CurrentRev ?? -1) == 1 && mutErr.Message.Contains(o1.SessionId),
             $"collab: stale_rev называет виновника ({mutErr?.Kind})");
         var show = Call(tools, "show", $$"""{"session_id":"{{o2.SessionId}}","start":1,"end":3}""", RpcJson.Default.ShowResult);
@@ -947,10 +948,10 @@ static class V070Stale {
         var rF = Open(tools, Fresh("f"), out var docF);
         docF.ReplaceLines(1, 1, "PEER", docF.Rev, false, null, actor: "peer");
         ToolException? texF = null;
-        try { Call(tools, $$"""{"session_id":"{{rF.SessionId}}","start":3,"end":3,"new_text":"X","expected_rev":0,"expect_old":"three"}"""); }
+        try { Call(tools, $$"""{"session_id":"{{rF.SessionId}}","start":3,"end":3,"new_text":"X","expected_rev":0,"expect_old":"three","retry_on_stale":false}"""); }
         catch (ToolException t) { texF = t; }
         SelfTest.CheckPublic(texF is not null && texF.Kind == "stale_rev",
-            "stale-recovery: без флага — прежний честный stale_rev");
+            "stale-recovery: явный false — прежний честный stale_rev (по умолчанию v0.8 — recovery)");
     }
 
     static OpenResult Open(ToolRegistry tools, string path, out EditSession doc) {
@@ -1051,6 +1052,89 @@ static class V073Harden {
             && Infra.UpdateCheck.IsPlatformAsset("SmartEdit-linux-x64-v1.zip", "fd", false)
             && Infra.UpdateCheck.Flavor() is "fd" or "sc" or "aot",
             "update: ассет выбирается по flavor установки (#13)");
+    }
+}
+
+/// <summary>
+/// v0.8: универсальный профильный лексер (консилиум-дизайн) — raw/triple/template/f-string/R"()"
+/// дают ЧЕСТНЫЙ баланс скобок, а незакрытые литералы репортятся ЯКОРЕМ на строку открытия.
+/// </summary>
+static class V080Literals {
+    public static void Run(string dir) {
+        // C# raw + $$-дырки + JSON-скобки внутри — тот самый фиксаж, на котором я страдал весь день
+        string cs = Path.Combine(dir, "lit.cs");
+        File.WriteAllText(cs,
+            """"
+            class W {
+                void M(int x) {
+                    var j = $$"""{"a": [1, {"b": {{x}}}]}""";
+                    var s = $"v={x + 1} literal={{}}";
+                }
+            }
+            """", new UTF8Encoding(false));
+        var scs = EditSession.Open(cs, null);
+        SelfTest.CheckPublic(scs.CheckBrackets(0, 0).Count == 0,
+            "lexer: C# raw $$-строки с JSON-скобками и $-интерполяцией — баланс чист");
+        scs.Dispose();
+
+        // Незакрытый raw: диагностика якорем на строку ОТКРЫТИЯ (v0.8 киллерфича)
+        string unclosed = Path.Combine(dir, "unclosed.cs");
+        File.WriteAllText(unclosed,
+            """"
+            class U {
+                void M() {
+                    var j = """{
+                }
+            }
+            """", new UTF8Encoding(false));
+        var su = EditSession.Open(unclosed, null);
+        var du = su.DiagReport(1, 4)!;
+        SelfTest.CheckPublic(du.Any(d => d.Code == "unterminated_literal" && d.Line == 3),
+            $"lexer: незакрытый raw — строка открытия [{string.Join("; ", du.Select(d => $"{d.Code}@{d.Line}"))}]");
+        su.Dispose();
+
+        // Python: triple + f-string с вложенными скобками + словарь в дырке
+        string py = Path.Combine(dir, "lit.py");
+        File.WriteAllText(py,
+            """"
+            def f(items):
+                doc = """title: {x}
+                """
+                m = {"k": [i for i in items if i > 0]}
+                return f"res={m['k'][0]} braced={{}}"
+            """", new UTF8Encoding(false));
+        var spy = EditSession.Open(py, null);
+        SelfTest.CheckPublic(spy.CheckBrackets(0, 0).Count == 0,
+            $"lexer: Python — [{string.Join("; ", spy.CheckBrackets(0, 0))}]");
+        spy.Dispose();
+
+        // JS: template с ${} (вложенный шаблон + объект) — старый стриппер слеп на `
+        string js = Path.Combine(dir, "lit.js");
+        File.WriteAllText(js,
+            """"
+            function render(user) {
+                const tpl = `Hello ${user.name} (${Object.keys({a: 1}).length}) ${`inner ${user.id}`}`;
+                return tpl;
+            }
+            """", new UTF8Encoding(false));
+        var sjs = EditSession.Open(js, null);
+        SelfTest.CheckPublic(sjs.CheckBrackets(0, 0).Count == 0,
+            $"lexer: JS — [{string.Join("; ", sjs.CheckBrackets(0, 0))}]");
+        sjs.Dispose();
+
+        // C++: R"delim(...)delim" — скобки в сырой строке игнорируются
+        string cpp = Path.Combine(dir, "lit.cpp");
+        File.WriteAllText(cpp,
+            """"
+            int main() {
+                const char* re = R"x(([{)] balanced junk)x";
+                return 0;
+            }
+            """", new UTF8Encoding(false));
+        var scpp = EditSession.Open(cpp, null);
+        SelfTest.CheckPublic(scpp.CheckBrackets(0, 0).Count == 0,
+            "lexer: C++ R\"delim(...)delim\" — сырая строка не ломает баланс");
+        scpp.Dispose();
     }
 }
 

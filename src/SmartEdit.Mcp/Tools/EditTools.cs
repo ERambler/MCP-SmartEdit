@@ -239,7 +239,7 @@ sealed class ReplaceLinesTool : ITool {
         int expectedRev = args.GetRequiredInt("expected_rev");
         bool dryRun = args.GetBool("dry_run");
         string? expectOld = args.GetNullableString("expect_old");
-        bool retryOnStale = args.GetBool("retry_on_stale");
+        bool retryOnStale = args.GetBool("retry_on_stale", true); // v0.8: recovery по умолчанию (opt-out: false)
         // retry живёт ВНУТРИ блокировки: между проверкой и повторным применением rev не двинется
         var outcome = await ToolOps.LockedAsync(s, () => {
             try { return s.ReplaceLines(start, end, newText, expectedRev, dryRun, expectOld, att.Id); }
@@ -251,6 +251,7 @@ sealed class ReplaceLinesTool : ITool {
             Rev = outcome.Rev, TotalLines = outcome.TotalLines, Diff = outcome.Diff, DryRun = outcome.DryRun,
             Brackets = outcome.Brackets?.ToArray(),
             Recovered = outcome.Recovered, Intervening = outcome.Intervening?.ToArray(),
+            Diagnostics = outcome.Diags?.Select(d => new DiagDto { Line = d.Line, Code = d.Code, Message = d.Message }).ToArray(),
         }, RpcJson.Default.MutationResult);
     }
 }

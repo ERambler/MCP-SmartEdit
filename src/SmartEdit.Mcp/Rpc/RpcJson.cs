@@ -21,6 +21,7 @@ namespace SmartEdit.Mcp.Rpc;
 [JsonSerializable(typeof(Tools.ShowResult))]
 [JsonSerializable(typeof(Tools.FindResult))]
 [JsonSerializable(typeof(Tools.MutationResult))]
+[JsonSerializable(typeof(Tools.DiagDto))]
 [JsonSerializable(typeof(Tools.SaveResult))]
 [JsonSerializable(typeof(Tools.CloseResult))]
 [JsonSerializable(typeof(Tools.SymbolsResult))]

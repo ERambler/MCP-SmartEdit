@@ -24,7 +24,7 @@ sealed class BatchTool : ITool {
             "expect_old":{"type":"string","description":"optional anchor: exact current text of start..end; mismatch rejects the batch"}
           },"required":["start","end","new_text"]}},
           "expected_rev":{"type":"integer"},
-          "retry_on_stale":{"type":"boolean","description":"auto-retry once on stale_rev when every edit is provably safe; default false"},
+          "retry_on_stale":{"type":"boolean","description":"auto-retry once on stale_rev when every edit is provably safe; default TRUE since v0.8 (pass false for the plain stale_rev)"},
           "dry_run":{"type":"boolean","description":"default false"}
         },"required":["session_id","edits","expected_rev"]}
         """;
@@ -34,7 +34,7 @@ sealed class BatchTool : ITool {
         var s = att.Doc;
         int expectedRev = args.GetRequiredInt("expected_rev");
         bool dryRun = args.GetBool("dry_run");
-        bool retryOnStale = args.GetBool("retry_on_stale");
+        bool retryOnStale = args.GetBool("retry_on_stale", true); // v0.8: recovery по умолчанию (opt-out: false)
         var ops = new List<BatchOp>();
         if (args.ValueKind == JsonValueKind.Object
             && args.TryGetProperty("edits", out var arr) && arr.ValueKind == JsonValueKind.Array) {
@@ -55,6 +55,7 @@ sealed class BatchTool : ITool {
             Rev = outcome.Rev, TotalLines = outcome.TotalLines, Applied = outcome.Applied, DryRun = outcome.DryRun,
             Diffs = outcome.Diffs.ToArray(), Brackets = outcome.Brackets?.ToArray(),
             Recovered = outcome.Recovered, Intervening = outcome.Intervening?.ToArray(),
+            Diagnostics = outcome.Diags?.Select(d => new DiagDto { Line = d.Line, Code = d.Code, Message = d.Message }).ToArray(),
         }, RpcJson.Default.BatchResult);
     }
 }

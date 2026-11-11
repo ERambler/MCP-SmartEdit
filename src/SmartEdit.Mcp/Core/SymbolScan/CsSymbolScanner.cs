@@ -46,7 +46,7 @@ public static partial class CsSymbolScanner {
 
         var stack = new Stack<(int Depth, Symbol Sym)>();
         int depth = 0;
-        bool inBlockComment = false, inVerbatim = false;
+        var lex = new LexerState(); // v0.8: профильный лексер (raw """/$$""" больше не ломают скан)
         var pendingDoc = new StringBuilder();
 
         for (int i = 0; i < lines.Count; i++) {
@@ -57,7 +57,7 @@ public static partial class CsSymbolScanner {
             if (trimmed.StartsWith("///")) { AppendDoc(pendingDoc, trimmed[3..]); continue; }
             if (trimmed.StartsWith("//") || trimmed.Length == 0) continue;
 
-            string code = CodeStrip.Strip(raw, ref inBlockComment, ref inVerbatim).TrimEnd();
+            string code = LiteralLexer.Strip(raw, lex, LiteralLexer.CSharp).TrimEnd();
             string trimmedCode = code.Trim();
             if (trimmedCode.Length == 0) continue;
 
@@ -141,8 +141,7 @@ public static partial class CsSymbolScanner {
         var sig = new StringBuilder(first);
         int endLine = i + 1;
         for (int k = 1; k <= 5 && i + k < lines.Count; k++) {
-            bool bc = false, bv = false;
-            string next = CodeStrip.Strip(lines[i + k], ref bc, ref bv).Trim();
+            string next = LiteralLexer.Strip(lines[i + k], new LexerState(), LiteralLexer.CSharp).Trim();
             sig.Append(' ').Append(next);
             endLine = i + k + 1;
             if (next.Contains('{') || next.Contains(';') || next.Contains("=>")) { i += k; return (endLine, sig.ToString().TrimEnd('{', ';').Trim()); }

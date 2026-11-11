@@ -6,10 +6,10 @@ using SmartEdit.Mcp.Core.SymbolScan;
 namespace SmartEdit.Mcp.Core;
 
 public sealed record FindHit(int Line, string Preview, string? Snippet, string? Where);
-public sealed record MutationOutcome(int Rev, int TotalLines, string Diff, bool DryRun, List<string>? Brackets, bool Recovered = false, List<string>? Intervening = null);
+public sealed record MutationOutcome(int Rev, int TotalLines, string Diff, bool DryRun, List<string>? Brackets, bool Recovered = false, List<string>? Intervening = null, List<BracketCheck.Diag>? Diags = null);
 public sealed record SaveOutcome(long BytesWritten, string? BackupPath, string Hash, string Encoding);
 public sealed record BatchOp(int Start, int End, string NewText, string? ExpectOld);
-public sealed record BatchOutcome(int Rev, int TotalLines, int Applied, List<string> Diffs, bool DryRun, List<string>? Brackets, bool Recovered = false, List<string>? Intervening = null);
+public sealed record BatchOutcome(int Rev, int TotalLines, int Applied, List<string> Diffs, bool DryRun, List<string>? Brackets, bool Recovered = false, List<string>? Intervening = null, List<BracketCheck.Diag>? Diags = null);
 public sealed record ReplaceAllOutcome(int Rev, int TotalLines, int Occurrences, List<int> Lines, bool DryRun, List<string>? Brackets);
 
 /// <summary>Компенсирующая операция для undo: строки [Old ↔ New] на позиции Start (позиция — hint: undo ищет по содержимому).</summary>
@@ -187,11 +187,15 @@ public sealed class EditSession : IDisposable {
         return BracketCheck.Check(i => GetLineText(i), Path, a, b, wholeFile: a == 1 && b == TotalLines); // потоково: без материализации строк
     }
 
-    List<string>? BracketReport(int fromLine, int toLine) {
+    List<string>? BracketReport(int fromLine, int toLine) =>
+        DiagReport(fromLine, toLine)?.Select(d => $"line {d.Line}: {d.Message}").ToList();
+
+    /// <summary>v0.8: структурные diagnostics (якоря + коды + незакрытые литералы) для ответов правок.</summary>
+    internal List<BracketCheck.Diag>? DiagReport(int fromLine, int toLine) {
         if (!SymbolDispatcher.IsCode(Path)) return null; // markdown/текст не семафорим
         // незакрытая скобка может закрываться строками ниже диапазона: для типичных
-        if (TotalLines <= 200_000) return CheckBrackets(0, 0); // полный чек: стриминг, RAM не растёт
-        return CheckBrackets(fromLine, toLine);
+        if (TotalLines <= 200_000) return BracketCheck.Diagnostics(i => GetLineText(i), Path, 1, TotalLines, wholeFile: true);
+        return BracketCheck.Diagnostics(i => GetLineText(i), Path, fromLine, toLine);
     }
 
     /// <summary>Перезагрузка с диска после save: база = только что записанный файл.</summary>
@@ -395,8 +399,9 @@ public sealed class EditSession : IDisposable {
             Undoable(oldLines, newLines) ? [(new InverseOp(start, oldLines, newLines))] : null,
             spanStart: start, spanEnd: end, spanDelta: newLines.Count - (end - start + 1));
         int newEnd = start + newLines.Count; // + строка после: ловим осиротевшую закрывающую
-        var brackets = BracketReport(Math.Max(1, start - 1), Math.Min(TotalLines, newEnd));
-        return new MutationOutcome(Rev, TotalLines, diff, DryRun: false, Brackets: brackets);
+        var diags = DiagReport(Math.Max(1, start - 1), Math.Min(TotalLines, newEnd));
+        var brackets = diags?.Select(d => $"line {d.Line}: {d.Message}").ToList();
+        return new MutationOutcome(Rev, TotalLines, diff, DryRun: false, Brackets: brackets, Diags: diags);
     }
 
     public MutationOutcome InsertAfter(int line, string text, int expectedRev, bool dryRun = false, string? actor = null) {
@@ -424,8 +429,9 @@ public sealed class EditSession : IDisposable {
         RecordMutation(actor, $"insert_after {line} (+{newLines.Count} lines)",
             Undoable([], newLines) ? [new InverseOp(line + 1, [], newLines)] : null,
             spanStart: line + 1, spanEnd: line, spanDelta: newLines.Count); // точка вставки: пустой спан
-        var brackets = BracketReport(Math.Max(1, line), Math.Min(TotalLines, line + newLines.Count + 1));
-        return new MutationOutcome(Rev, TotalLines, diff, DryRun: false, Brackets: brackets);
+        var diags = DiagReport(Math.Max(1, line), Math.Min(TotalLines, line + newLines.Count + 1));
+        var brackets = diags?.Select(d => $"line {d.Line}: {d.Message}").ToList();
+        return new MutationOutcome(Rev, TotalLines, diff, DryRun: false, Brackets: brackets, Diags: diags);
     }
 
 
@@ -502,8 +508,9 @@ public sealed class EditSession : IDisposable {
                 ? [.. plan.OrderByDescending(p => p.Op.Start).Select(p => new InverseOp(p.Op.Start, p.OldLines, p.NewLines))]
                 : null,
             spanStart: first, spanEnd: last, spanDelta: delta);
-        var brackets = BracketReport(Math.Max(1, first - 1), Math.Min(TotalLines, last + Math.Max(delta, 0) + 4));
-        return new BatchOutcome(Rev, TotalLines, plan.Length, [.. plan.Select(p => p.Diff)], DryRun: false, Brackets: brackets);
+        var diags = DiagReport(Math.Max(1, first - 1), Math.Min(TotalLines, last + Math.Max(delta, 0) + 4));
+        var brackets = diags?.Select(d => $"line {d.Line}: {d.Message}").ToList();
+        return new BatchOutcome(Rev, TotalLines, plan.Length, [.. plan.Select(p => p.Diff)], DryRun: false, Brackets: brackets, Diags: diags);
     }
 
     /// <summary>

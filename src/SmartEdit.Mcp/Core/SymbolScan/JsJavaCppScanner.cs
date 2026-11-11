@@ -31,7 +31,9 @@ public static partial class JsJavaCppScanner {
         var stack = new Stack<(int Depth, Symbol Sym)>();
         var sink = roots;
         int depth = 0;
-        bool inBlockComment = false, inVerbatim = false;
+        // v0.8: профильный лексер — template ${}/text block/R"()" не ломают структуру
+        var profile = lang == "cpp" ? LiteralLexer.Cpp : LiteralLexer.JsTsJava;
+        var lex = new LexerState();
         bool topOnly = true; // import/using — только сверху
         string? pendingDoc = null;
 
@@ -40,17 +42,15 @@ public static partial class JsJavaCppScanner {
             string trimmed = raw.TrimStart();
             if (trimmed.Length == 0) continue;
 
-            if (trimmed.StartsWith("/**") || trimmed.StartsWith("/*") || inBlockComment) {
+            if (trimmed.StartsWith("/**") || trimmed.StartsWith("/*") || lex.Kind == LexerState.BlockComment) {
                 string inner = trimmed.TrimStart('/', '*').Trim();
                 if (pendingDoc is null && inner.Length > 0 && !inner.StartsWith("*")) pendingDoc = Short(inner);
-                bool bc = inBlockComment;
-                _ = CodeStrip.Strip(raw, ref bc, ref inVerbatim);
-                inBlockComment = bc;
+                _ = LiteralLexer.Strip(raw, lex, profile);
                 continue;
             }
             if (trimmed.StartsWith("//") || trimmed.StartsWith("*")) continue;
 
-            string code = CodeStrip.Strip(raw, ref inBlockComment, ref inVerbatim).Trim();
+            string code = LiteralLexer.Strip(raw, lex, profile).Trim();
             if (code.Length == 0) continue;
 
             if (topOnly && (code.StartsWith("import ") || code.StartsWith("using ") || code.StartsWith("#include"))) {
