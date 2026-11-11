@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.6.0 (2026-11-11)
+
+- **Update check**: on startup the server fetches the GitHub latest release (background thread, 5 s timeout — stdio is never blocked). A newer version triggers a native system dialog with the release notes and OK/Cancel: **OK** downloads the release zip to `<DataRoot>\downloads` and opens the folder; **Cancel** is remembered per-version — a declined version is never offered again, the next release will ask. Windows: `MessageBoxW`; Linux: `zenity`/`kdialog`/`xmessage` under DISPLAY/WAYLAND_DISPLAY, headless → journal notice only. Kill switch: `--no-update` arg or `SMARTEDIT_NO_UPDATE_CHECK=1`. Selftested (version compare, decline memory, dialog text, kill switch); the full popup→download flow was verified live
+
 ## v0.5.3 (2026-11-11)
 
 - **Security**: `SMARTEDIT_LOG=debug` no longer writes raw JSON-RPC lines into the shared journal — tool-call arguments (file contents, edit texts, notes — potentially logins/tokens) were landing in the machine-wide `mcp.log`, readable via the `log` tool from any chat/project. Debug lines now carry method/id/length only (`← id=7 method=tools/call len=15234`); payloads never enter the journal. Selftested (`debug-brief …`)

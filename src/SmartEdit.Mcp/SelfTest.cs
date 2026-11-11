@@ -42,6 +42,7 @@ public static class SelfTest {
         V05Nav.UndoAndGoto(dir);
         V051Detect.Utf8BoundaryCyrillic(dir);
         V053Security.DebugBrief();
+        V054Update.Run(dir);
         V03Features.BatchAndAnchors(dir);
         await V03Features.StructuredErrorsAsync(dir);
         V03Features.ReplaceAllTests(dir);
@@ -757,6 +758,33 @@ static class V053Security {
         var bad = JsonRpcServer.Brief("not json — raw token=abc123");
         SelfTest.CheckPublic(bad.Contains("unparsable") && !bad.Contains("abc123"),
             "debug-brief: непарсируемая строка помечена, содержимое не пишется");
+    }
+}
+
+/// <summary>v0.6: проверка обновлений — версии, память отказа, текст диалога, выключатель. Без сети.</summary>
+static class V054Update {
+    public static void Run(string dir) {
+        SelfTest.CheckPublic(Infra.UpdateCheck.IsNewer("v0.5.4", "0.5.3"), "update: v0.5.4 > v0.5.3");
+        SelfTest.CheckPublic(!Infra.UpdateCheck.IsNewer("v0.5.3", "0.5.3"), "update: та же версия не новее");
+        SelfTest.CheckPublic(!Infra.UpdateCheck.IsNewer("v0.5.2", "0.5.3"), "update: старая не новее");
+        SelfTest.CheckPublic(Infra.UpdateCheck.IsNewer("v0.6.0", "0.5.9"), "update: minor растёт");
+        SelfTest.CheckPublic(!Infra.UpdateCheck.IsNewer("latest", "0.5.3"), "update: кривой тег — не новее");
+
+        // однократность: отказ от vN — молчим по vN, спросим снова только про vN+1
+        string decl = Path.Combine(dir, "update-declined.txt");
+        SelfTest.CheckPublic(!Infra.UpdateCheck.IsDeclined(decl, "v0.6.0"), "update: изначально не отклонена");
+        Infra.UpdateCheck.WriteDeclined(decl, "v0.6.0");
+        SelfTest.CheckPublic(Infra.UpdateCheck.IsDeclined(decl, "v0.6.0"), "update: отклонённая версия не предлагается повторно");
+        SelfTest.CheckPublic(!Infra.UpdateCheck.IsDeclined(decl, "v0.6.1"), "update: следующая версия снова предлагается");
+
+        string t = Infra.UpdateCheck.PromptText("v0.6.0", "0.5.3", new string('x', 5000));
+        SelfTest.CheckPublic(t.Contains("v0.6.0") && t.Contains("v0.5.3") && t.Length < 1400,
+            "update: текст диалога содержит версии, длинные notes обрезаются");
+
+        SelfTest.CheckPublic(Infra.UpdateCheck.DisabledByArgs(new[] { "--no-update" })
+            && !Infra.UpdateCheck.DisabledByArgs(Array.Empty<string>())
+            && Infra.UpdateCheck.DisabledByArgs(new[] { "--NO-UPDATE", "selftest" }),
+            "update: --no-update отключает проверку (регистронезависимо)");
     }
 }
 
