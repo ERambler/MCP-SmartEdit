@@ -1,5 +1,13 @@
 # Changelog
 
+
+## v0.7.3 (2026-11-11)
+
+- **Telemetry hygiene** (#10): `selftest` runs redirect their data dir (journal, declined-marker, downloads) to a temp folder — the shared production `mcp.log` now reflects real agent usage only (today's raw stats were poisoned by ~40 test runs: 6.1 % apparent errors vs 3.7 % real)
+- **Empty-file insert** (#11): `replace_lines` with `start=1, end=0` on a 0-line file now inserts the first lines (same `end=start-1` convention as `edit_batch`) — previously the natural call was rejected with `invalid_range`
+- **Session GC** (#12): `open` opportunistically detaches stale (>30 min silent) attachments with no pending edits (journaled per eviction); the shared document is kept — week-long servers stop accumulating abandoned attachments (16 leaked today)
+- **Flavor-preserving updates** (#13): the updater detects its own install flavor — `fd` (framework-dependent) / `sc` (self-contained) / `aot` — and only offers a matching asset: an SC install can no longer miss updates or be downgraded to a runtime-dependent binary; when the AOT asset ships, AOT updates AOT→AOT
+ 
 ## v0.7.2 (2026-11-11)
 
 - **save-torture guard**: two real-world incidents today showed `save` publishing the PREVIOUS rev's content (duplicate lines on disk while the in-memory document was correct). A deterministic (seeded) torture test now runs a shuffled stream of replace/batch/insert/delete/undo mutations with a save + byte-exact disk↔document comparison after EVERY step — 23 mutations / 29 saves, all byte-identical. The current engine is clean; the artifacts traced back to a legacy server binary still running from before the v0.7 rework. The guard locks the property forever

@@ -32,6 +32,7 @@ static class Sessions {
     /// <summary>Подключиться к документу пути (переиспользовать существующий или открыть новый).</summary>
     public static (Attachment Att, bool Reused) Attach(string path, string? encoding, string? note) {
         lock (Map) {
+            PruneStale(); // #12: GC брошенных подключений до проверки лимита — живой сервер не копит мусор
             if (Map.Count >= MaxSessions)
                 throw new ToolException(ToolException.InvalidArgs, $"{MaxSessions} sessions already open — close one");
             string canonical = System.IO.Path.GetFullPath(path);
@@ -45,6 +46,19 @@ static class Sessions {
             var first = new Attachment { Id = "s" + Guid.NewGuid().ToString("N")[..8], Doc = s, Note = note, LastSeenRev = 0 };
             Map[first.Id] = first;
             return (first, false);
+        }
+    }
+
+    /// <summary>
+    /// #12: GC подключений — stale (&gt;30 минут тишины) без несохранённых правок отцепляем прямо в open.
+    /// Документ НЕ гасим (остаётся в ByPath — данные и rev живы, вдруг агент вернётся); живой
+    /// сервер неделями не должен копить attachment'ы брошенных разговоров.
+    /// </summary>
+    static void PruneStale() {
+        foreach (var a in Map.Values) {
+            if (!a.Stale || a.Doc.PendingEdits.GetValueOrDefault(a.Id) > 0) continue;
+            if (Map.TryRemove(a.Id, out _))
+                SmartEdit.Mcp.Infra.Log.Info($"sessions: auto-detach {a.Id} (idle >30m, no pending edits) — document kept");
         }
     }
 

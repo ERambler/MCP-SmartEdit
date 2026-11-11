@@ -46,6 +46,7 @@ public static class SelfTest {
         V062Outline.Run(dir);
         V070Stale.Run(dir);
         V072SaveTorture.Run(dir);
+        V073Harden.Run(dir);
         V03Features.BatchAndAnchors(dir);
         await V03Features.StructuredErrorsAsync(dir);
         V03Features.ReplaceAllTests(dir);
@@ -1011,6 +1012,45 @@ static class V072SaveTorture {
         }
         SelfTest.CheckPublic(saves > 20 && muts > 15, $"save-torture: плотность достигнута ({muts} мутаций / {saves} сохранений)");
         s.Dispose();
+    }
+}
+
+/// <summary>v0.7.3: операционная гигиена из телеметрии — #10 изоляция selftest-журнала, #11 пустой файл, #12 session GC, #13 flavor апдейта.</summary>
+static class V073Harden {
+    public static void Run(string dir) {
+        // #10: selftest обязан писать во временный каталог данных, не в продакшн-журнал
+        SelfTest.CheckPublic(Infra.AppPaths.DataRoot.Contains("smartedit-selftest-data"),
+            "telemetry: selftest пишет в изолированный каталог (#10)");
+
+        // #11: [1..0] в пустом файле = вставка первой строки (конвенция end=start-1)
+        string empty = Path.Combine(dir, "empty.txt");
+        File.WriteAllText(empty, "", new UTF8Encoding(false));
+        var se = EditSession.Open(empty, null);
+        var me = se.ReplaceLines(1, 0, "hello\nworld", 0, false);
+        SelfTest.CheckPublic(me.Rev == 1 && se.TotalLines == 2 && se.GetLineText(2) == "world",
+            "empty: replace_lines [1..0] вставляет в пустой файл (#11)");
+        se.Dispose();
+
+        // #12: stale-подключение без pending отцепляется при следующем open (документ жив)
+        string gc = Path.Combine(dir, "gc.txt");
+        File.WriteAllText(gc, "x\n", new UTF8Encoding(false));
+        var (a1, _) = Sessions.Attach(gc, null, null);
+        a1.LastSeen = DateTime.UtcNow.AddMinutes(-31); // поле публичное — имитируем тишину
+        var (a2, _) = Sessions.Attach(gc, null, null);
+        SelfTest.CheckPublic(!Sessions.Map.ContainsKey(a1.Id) && Sessions.Map.ContainsKey(a2.Id),
+            "sessions: stale-подключение без pending отцеплено GC, документ жив (#12)");
+        Sessions.Detach(a2.Id, true);
+
+        // #13: flavor-сохраняющий выбор ассета — fd/sc/aot не смешиваются
+        SelfTest.CheckPublic(
+            Infra.UpdateCheck.IsPlatformAsset("SmartEdit-win-x64-v1.zip", "fd", true)
+            && Infra.UpdateCheck.IsPlatformAsset("SmartEdit-sc-win-x64-v1.zip", "sc", true)
+            && Infra.UpdateCheck.IsPlatformAsset("SmartEdit-aot-win-x64-v1.zip", "aot", true)
+            && !Infra.UpdateCheck.IsPlatformAsset("SmartEdit-win-x64-v1.zip", "sc", true)
+            && !Infra.UpdateCheck.IsPlatformAsset("SmartEdit-sc-win-x64-v1.zip", "fd", true)
+            && Infra.UpdateCheck.IsPlatformAsset("SmartEdit-linux-x64-v1.zip", "fd", false)
+            && Infra.UpdateCheck.Flavor() is "fd" or "sc" or "aot",
+            "update: ассет выбирается по flavor установки (#13)");
     }
 }
 

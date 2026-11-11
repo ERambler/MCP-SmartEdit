@@ -371,9 +371,12 @@ public sealed class EditSession : IDisposable {
 
     public MutationOutcome ReplaceLines(int start, int end, string newText, int expectedRev, bool dryRun, string? expectOld = null, string? actor = null) {
         CheckRev(expectedRev);
-        if (start < 1 || end > TotalLines || start > end)
+        CheckRev(expectedRev);
+        // #11: [1..0] в пустом файле = вставка первой строки (та же конвенция end=start-1, что и в edit_batch)
+        bool emptyInsert = TotalLines == 0 && start == 1 && end == 0;
+        if (start < 1 || end > TotalLines || (start > end && !emptyInsert))
             throw new ToolException(ToolException.InvalidRange,
-                $"range [{start}..{end}] invalid: file has {TotalLines} lines (1-based, inclusive)",
+                $"range [{start}..{end}] invalid: file has {TotalLines} lines (1-based, inclusive; end=start-1 inserts)",
                 currentRev: Rev, totalLines: TotalLines);
         if (expectOld is not null) CheckAnchor(start, end - start + 1, expectOld);
         var newLines = ParseLines(newText);

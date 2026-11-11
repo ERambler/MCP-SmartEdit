@@ -52,7 +52,7 @@ public static class UpdateCheck {
                         foreach (var asset in a.EnumerateArray())
                             if (asset.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String
                                 && asset.TryGetProperty("browser_download_url", out var u) && u.ValueKind == JsonValueKind.String
-                                && IsPlatformAsset(n.GetString()!)) {
+                                && IsPlatformAsset(n.GetString()!, Flavor(), OperatingSystem.IsWindows())) {
                                 assetName = n.GetString()!; assetUrl = u.GetString()!; break;
                             }
                 }
@@ -61,7 +61,7 @@ public static class UpdateCheck {
             string current = Rpc.McpProtocolHandler.ServerVersion;
             if (!IsNewer(tag, current)) return;
             if (assetUrl is null) {
-                Log.Info($"update: доступна {tag} (у вас v{current}), но нет ассета под эту ОС — github.com/{Repo}/releases");
+                Log.Info($"update: доступна {tag} (у вас v{current}), но нет ассета под этот вариант установки ({Flavor()})/ОС — github.com/{Repo}/releases");
                 return;
             }
             if (IsDeclined(DeclinedPath, tag)) {
@@ -96,9 +96,28 @@ public static class UpdateCheck {
         return true;
     }
 
-    static bool IsPlatformAsset(string name) => OperatingSystem.IsWindows()
-        ? name.StartsWith("SmartEdit-win-x64-", StringComparison.Ordinal)
-        : name.StartsWith("SmartEdit-linux", StringComparison.Ordinal);
+    /// <summary>
+    /// #13: вариант установки СВОЕГО бинарника — апдейт не должен менять способ установки:
+    /// fd (нужен .NET-рантайм) / sc (self-contained, рантайм в комплекте) / aot. SC-машина без
+    /// рантайма ни при каких обстоятельствах не должна получить framework-dependent ассет.
+    /// </summary>
+    internal static string Flavor() {
+        if (!System.Runtime.CompilerServices.RuntimeFeature.IsDynamicCodeSupported) return "aot";
+        // SC: каталог рантайма совпадает с каталогом приложения; framework-dependent — Program Files\dotnet
+        string rt = System.Runtime.InteropServices.RuntimeEnvironment.GetRuntimeDirectory();
+        return rt.StartsWith(AppContext.BaseDirectory, StringComparison.OrdinalIgnoreCase) ? "sc" : "fd";
+    }
+
+    /// <summary>Ассет соответствует платформе И варианту установки (#13): flavor сохраняется.</summary>
+    internal static bool IsPlatformAsset(string name, string flavor, bool windows) {
+        if (!windows) return name.StartsWith("SmartEdit-linux", StringComparison.Ordinal);
+        string prefix = flavor switch {
+            "sc" => "SmartEdit-sc-win-x64-",
+            "aot" => "SmartEdit-aot-win-x64-",
+            _ => "SmartEdit-win-x64-",
+        };
+        return name.StartsWith(prefix, StringComparison.Ordinal);
+    }
 
     internal static bool IsDeclined(string path, string tag) {
         try { return File.Exists(path) && File.ReadAllText(path).Trim() == tag; }

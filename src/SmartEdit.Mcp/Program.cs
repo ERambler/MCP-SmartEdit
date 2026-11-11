@@ -3,6 +3,12 @@ using SmartEdit.Mcp.Infra;
 using SmartEdit.Mcp.Rpc;
 using SmartEdit.Mcp.Tools;
 
+// #10: телеметрия selftest-прогонов НЕ должна загрязнять общий журнал продакшена —
+// редирект каталога данных ДО первого обращения к AppPaths/Log (их статические поля читают env лениво)
+if (args.Length > 0 && args[0] == "selftest")
+    Environment.SetEnvironmentVariable("SMARTEDIT_DATA_DIR",
+        System.IO.Path.Combine(System.IO.Path.GetTempPath(), "smartedit-selftest-data"));
+
 AppPaths.EnsureCreated();
 // cp1251 для транскод-пути (под AOT таблицы кодовых страниц нужно регистрировать явно)
 Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
