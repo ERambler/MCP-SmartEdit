@@ -7,8 +7,16 @@ namespace SmartEdit.Mcp.Rpc;
 
 /// <summary>Диспетчер MCP-методов: initialize, ping, tools/list, tools/call.</summary>
 public sealed class McpProtocolHandler(ToolRegistry tools) {
-    public const string ServerVersion = "0.5.1";
+    public const string ServerVersion = "0.5.2";
     public const string ProtocolVersion = "2025-06-18";
+
+    /// <summary>
+    /// Телеметрия — строки «tool … → ok» с краткой подписью аргументов. Отключается
+    /// переменной окружения SMARTEDIT_TELEMETRY=off (также 0/false). Ошибки остаются: это диагностика, не телеметрия.
+    /// </summary>
+    static readonly bool TelemetryEnabled =
+        Environment.GetEnvironmentVariable("SMARTEDIT_TELEMETRY") is not { } t
+        || !(t.Equals("off", StringComparison.OrdinalIgnoreCase) || t == "0" || t.Equals("false", StringComparison.OrdinalIgnoreCase));
 
     public async Task<(JsonElement? Result, RpcError? Error)> HandleAsync(RpcRequest req) {
         switch (req.Method) {
@@ -61,7 +69,7 @@ public sealed class McpProtocolHandler(ToolRegistry tools) {
         var sw = System.Diagnostics.Stopwatch.StartNew();
         try {
             string text = await tools.CallAsync(name, args, CancellationToken.None);
-            Log.Info($"tool {name}{ArgsBrief(args)} → ok за {sw.Elapsed.TotalMilliseconds:0}мс");
+            if (TelemetryEnabled) Log.Info($"tool {name}{ArgsBrief(args)} → ok за {sw.Elapsed.TotalMilliseconds:0}мс");
             return (Elem(ToolResult(text, isError: false), RpcJson.Default.CallToolResult), null);
         }
         catch (ToolException tex) {

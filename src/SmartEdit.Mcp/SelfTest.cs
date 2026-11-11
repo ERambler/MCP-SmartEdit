@@ -728,6 +728,14 @@ static class V05Features {
         SelfTest.CheckPublic(r.Lines.Length > 0 && r.Lines[^1].Contains(marker), "log: ручка находит собственную запись (общий журнал)");
         var err = CallLog(tools, """{"errors_only":true,"tail":10}""");
         SelfTest.CheckPublic(err.Lines.All(l => l.Contains("[ERROR]")), "log: errors_only фильтрует");
+
+        // log forging: перенос строки и ANSI ESC в сообщении не должны рождать новые строки журнала
+        const string forged = "smartedit-forged\n2026-01-01 00:00:00.000 [ERROR] [pid 1] fake\u001b[31m";
+        SmartEdit.Mcp.Infra.Log.Error(forged);
+        var fr = CallLog(tools, """{"tail":25,"grep":"smartedit-forged"}""");
+        SelfTest.CheckPublic(
+            fr.Lines.Length > 0 && fr.Lines[^1].Contains("smartedit-forged\\n2026-01-01") && fr.Lines[^1].Contains("\\u001b[31m"),
+            "log: sanitize — \\n и ESC экранируются, подделка строк журнала невозможна");
     }
 
     static LogResult CallLog(ToolRegistry tools, string argsJson) {

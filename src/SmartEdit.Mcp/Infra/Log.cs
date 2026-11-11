@@ -30,7 +30,7 @@ public static class Log {
     public static void Debug(string msg) { if (DebugEnabled) Write("DEBUG", msg); }
 
     static void Write(string level, string msg) {
-        var line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [{level}] [pid {Pid}] {msg}";
+        var line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [{level}] [pid {Pid}] {Sanitize(msg)}";
         lock (Gate) {
             try {
                 bool held = Interprocess.WaitOne(2000);
@@ -43,6 +43,31 @@ public static class Log {
             catch { /* журнал не должен ронять сервер */ }
             try { Stderr.WriteLine(line); } catch { }
         }
+    }
+
+    /// <summary>
+    /// Экранирование control-символов (\r \n \t, ANSI ESC, U+2028/2029): одна запись журнала — ровно одна строка.
+    /// Защита от log forging: в msg попадают клиентские данные (имена инструментов, пути, session_id,
+    /// тексты ошибок), перенос строки в них подделал бы записи журнала, которые затем читает
+    /// инструмент log в чужих чатах/проектах (общий журнал на все процессы).
+    /// </summary>
+    static string Sanitize(string msg) {
+        bool dirty = false;
+        foreach (var ch in msg)
+            if (char.IsControl(ch) || ch is '\u2028' or '\u2029') { dirty = true; break; }
+        if (!dirty) return msg; // горячий путь: почти всегда чисто
+        var sb = new StringBuilder(msg.Length + 16);
+        foreach (var ch in msg)
+            switch (ch) {
+                case '\n': sb.Append("\\n"); break;
+                case '\r': sb.Append("\\r"); break;
+                case '\t': sb.Append("\\t"); break;
+                default:
+                    if (char.IsControl(ch) || ch is '\u2028' or '\u2029') sb.Append($"\\u{(int)ch:x4}");
+                    else sb.Append(ch);
+                    break;
+            }
+        return sb.ToString();
     }
 
     /// <summary>mcp.log → .1 → .2; старейший архив удаляется. Вызывается при каждой записи (дёшево: одна stat).</summary>

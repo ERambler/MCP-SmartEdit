@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.5.2 (2026-11-11)
+
+- **Security**: log injection (log forging) fixed — `Log.Write` now escapes `\r`/`\n`/`\t`, ANSI ESC and other control chars (plus U+2028/2029) in every message; one journal entry is exactly one line. Client-controlled data reaches the journal via tool names, `path` file-name parts (`Path.GetFileName` does not strip `\n`), `session_id`s, and exception texts — a raw newline there could forge entries that the `log` tool later shows to agents in *other* chats/projects (the journal is machine-wide shared). Covered by a selftest (`log: sanitize … log forging impossible`); unhandled-exception logging switched from `{ex}` (multi-line stack) to `ex.Message`
+- **`SMARTEDIT_TELEMETRY=off`** (also `0`/`false`): opt-out of telemetry — the `tool … → ok` lines with args summary. Error lines stay (diagnostics, not telemetry)
+
 ## v0.5.1 (2026-11-11)
 
 - **Fixed**: UTF-8 detection falsely rejected valid files when a multi-byte (e.g. Cyrillic) character started exactly at the 4096-byte sample boundary — `open` and post-save reload failed with a wrong "not valid UTF-8". Detection now uses an exception-free prefix scanner (boundary truncation allowed, broken continuation inside = honest NotUtf8). Regression-tested.

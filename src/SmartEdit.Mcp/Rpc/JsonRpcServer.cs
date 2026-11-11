@@ -58,7 +58,8 @@ public sealed class JsonRpcServer(McpProtocolHandler handler) {
             Write(new RpcResponse { Id = req.Id, Result = result, Error = error });
         }
         catch (Exception ex) {
-            Log.Error($"необработанная ошибка в {req.Method}: {ex}");
+            // ex.Message (не {ex}): ToString() многострочен (стек) — ломает «одна запись = одна строка» журнала
+            Log.Error($"необработанная ошибка в {req.Method}: {ex.Message}");
             if (req.Id is not null)
                 Write(new RpcResponse { Id = req.Id, Error = new() { Code = -32603, Message = "Internal error" } });
         }
