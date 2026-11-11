@@ -102,7 +102,7 @@ Learned the hard way:
 - New server = **new chat session** (no hot reload). Restart the client or open a new conversation after editing the config.
 - The exe is **locked while a session uses it**: to upgrade, close chats / `Stop-Process -Name SmartEdit.Mcp`, overwrite, reopen.
 - An open session holds its file `FileShare.Read` — external writers get EBUSY until `close`. Intentional; call `sessions` if a file feels locked.
-- Optional companion skill (usage protocol, smart vs built-in edit): copy [`skills/zcode-smartedit/SKILL.md`](skills/zcode-smartedit/SKILL.md) to `~/.zcode/skills/smartedit/SKILL.md`.
+- Optional companion skill (usage protocol, smart vs built-in edit): copy [`skills/zcode-smartedit/SKILL.md`](skills/zcode-smartedit/SKILL.md) to `~/.zcode/skills/smartedit/SKILL.md`. **Writing your own skill for another agent/client?** Read [`skills/README.md`](skills/README.md) first — a field-tested guide on authoring skills that make agents confidently prefer the right tool (routing descriptions, error→action branches, counter-intuitive semantics, lifecycle hygiene).
 
 ### Claude Desktop
 
@@ -168,12 +168,24 @@ Every mutation response carries: new `rev`, unified `diff`, bracket problems, an
 
 See [CHANGELOG.md](CHANGELOG.md). Highlights: v0.2 structure vision -> v0.3 batch/anchors/JSON errors -> v0.4 multi-agent collaboration -> v0.5 undo/goto/shared log + telemetry v2 -> v0.5.1 UTF-8 boundary fix.
 
-## Roadmap
+## Roadmap & TODO
 
-- stale-rev auto-recovery (retry-once with anchor revalidation) — P0 per telemetry
-- code outline inside the `open` response (adoption fix for structure vision)
-- multi-file transactions (`edit_transaction` across sessions, commit-all-or-nothing)
-- self-contained + Native AOT builds, CI workflow
+Tracked in [GitHub Issues](https://github.com/ERambler/MCP-SmartEdit/issues) — pick one and contribute:
+
+- [#1 stale-rev auto-recovery](https://github.com/ERambler/MCP-SmartEdit/issues/1) — retry-once with anchor revalidation (**P0** per telemetry: 8.6 % of replaces hit stale_rev)
+- [#2 code outline in `open` response](https://github.com/ERambler/MCP-SmartEdit/issues/2) — adoption fix for structure vision (3 uses / 86 opens)
+- [#3 multi-file transactions](https://github.com/ERambler/MCP-SmartEdit/issues/3) — `edit_transaction` across sessions, commit-all-or-nothing
+- [#4 CI: build + selftest gate + release artifact](https://github.com/ERambler/MCP-SmartEdit/issues/4)
+- [#5 self-contained & Native AOT builds](https://github.com/ERambler/MCP-SmartEdit/issues/5) — drop the .NET 10 runtime requirement
+- [#6 attention tracking](https://github.com/ERambler/MCP-SmartEdit/issues/6) — warn on edits to ranges the agent never read ("you're editing blind at line 812")
+- [#7 parameterized edit recipes](https://github.com/ERambler/MCP-SmartEdit/issues/7) — replayable validated refactors across N files (LLM-consultant idea)
+- [#1 stale-rev auto-recovery](https://github.com/ERambler/MCP-SmartEdit/issues/1) — retry-once with anchor revalidation (**P0** per telemetry: 8.6 % of replaces hit stale_rev)
+- [#2 code outline in `open` response](https://github.com/ERambler/MCP-SmartEdit/issues/2) — adoption fix for structure vision (3 uses / 86 opens)
+- [#3 multi-file transactions](https://github.com/ERambler/MCP-SmartEdit/issues/3) — `edit_transaction` across sessions, commit-all-or-nothing
+- [#4 CI: build + selftest gate + release artifact](https://github.com/ERambler/MCP-SmartEdit/issues/4)
+- [#5 self-contained & Native AOT builds](https://github.com/ERambler/MCP-SmartEdit/issues/5) — drop the .NET 10 runtime requirement
+- [#6 attention tracking](https://github.com/ERambler/MCP-SmartEdit/issues/6) — warn on edits to ranges the agent never read ("you're editing blind at line 812")
+- [#7 parameterized edit recipes](https://github.com/ERambler/MCP-SmartEdit/issues/7) — replayable validated refactors across N files (LLM-consultant idea)
 
 ## License
 
