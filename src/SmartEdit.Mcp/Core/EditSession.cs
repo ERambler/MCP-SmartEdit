@@ -407,7 +407,9 @@ public sealed class EditSession : IDisposable {
         string diff;
         if (newLines.Count == 0) diff = "(nothing to insert: empty text)";
         else {
-            var before = Context(line - 2, 2);
+            // before = строки [line-1..line]: якорная строка, ПОСЛЕ которой вставляем, обязана быть в контексте
+            // (раньше брали [line-2..line-1] — дифф показывал лишнюю строку выше и прятал якорь)
+            var before = Context(line - 1, 2);
             var after = Context(line + 1, 2);
             diff = Differ.Unified(before, [], newLines, after, line + 1);
         }

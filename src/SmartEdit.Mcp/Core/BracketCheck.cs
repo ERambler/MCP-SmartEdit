@@ -7,7 +7,11 @@ namespace SmartEdit.Mcp.Core;
 /// &lt;&gt; в C# — lost cause из-за generics, проверяем только пары {}[]()); строки/комментарии/
 /// интерполяция исключает стейт-машина CodeStrip (скобки кода внутри {дырок} $"…" считаются).
 /// Строки подаются лениво (lineAt): полный чек гиганта не материализует файл в RAM.
-/// Отчёт — до limit проблем: «line N: 'X' не закрыта / лишняя».
+/// Алгоритм — канонический стек пар с позицией (как в линтерах/редакторах): каждый отчёт несёт
+/// ЯКОРЬ — строку открывающей скобки. Несовпадение пары: якорь на открытую + pop для ресинка
+/// (иначе одна ошибка каскадирует на весь остаток файла). Незакрытые в EOF — в порядке исходника:
+/// внешняя первой (Stack перечисляет новейшие первыми → разворачиваем).
+/// Отчёт — до limit проблем.
 /// </summary>
 public static class BracketCheck {
     public static List<string> Check(Func<int, string> lineAt, string path, int fromLine, int toLine,
@@ -29,20 +33,33 @@ public static class BracketCheck {
                 }
                 else if (c is '}' or ']' or ')' || (markup && c == '>' && TagBehind(code, j))) {
                     char expected = c switch { '}' => '{', ']' => '[', ')' => '(', _ => '<' };
-                    if (stack.Count > 0 && stack.Peek().Open == expected) stack.Pop();
-                    else if (problems.Count < limit) problems.Add($"line {i}: unexpected '{c}'");
+                    if (stack.Count == 0) {
+                        if (problems.Count < limit)
+                            problems.Add($"line {i}: '{c}' closes nothing (no '{expected}' open above)");
+                    }
+                    else if (stack.Peek().Open == expected) {
+                        stack.Pop();
+                    }
+                    else {
+                        var (open, openLine) = stack.Pop(); // ресинк: одна ошибка не должна каскадить
+                        if (problems.Count < limit)
+                            problems.Add($"line {i}: '{c}' here, but '{open}' from line {openLine} is still open — missing '{Closer(open)}'?");
+                    }
                 }
                 if (problems.Count >= limit) return problems;
             }
         }
         // неучтённые открытия: локальный диапазон может «забыть» закрывающие из соседних строк —
-        // репортим только когда диапазон покрывает весь файл
+        // репортим только когда диапазон покрывает весь файл; внешняя незакрытая — первой
         if (wholeFile) {
-            foreach (var (open, line) in stack)
-                if (problems.Count < limit) problems.Add($"line {line}: '{open}' not closed");
+            foreach (var (open, line) in stack.Reverse())
+                if (problems.Count < limit)
+                    problems.Add($"line {line}: '{open}' opened here is never closed (missing '{Closer(open)}')");
         }
         return problems;
     }
+
+    static char Closer(char open) => open switch { '{' => '}', '[' => ']', '(' => ')', _ => '>' };
 
     static bool TagAhead(string code, int j) =>
         j + 1 < code.Length && (char.IsLetter(code[j + 1]) || code[j + 1] == '/' || code[j + 1] == '!' || code[j + 1] == '?');

@@ -2,7 +2,7 @@
 
 **Line-based text editor for LLM agents.** A zero-dependency [Model Context Protocol](https://modelcontextprotocol.io) stdio server that lets coding agents edit files by **line numbers** — no byte-exact `old_string` to drift out of sync, no whole files loaded into context. Works with any MCP client: **ZCode, Claude Desktop, Cursor, Windsurf, Cline** and anything else that speaks stdio MCP.
 
-[![Version](https://img.shields.io/badge/version-v0.7.0-blue)](https://github.com/ERambler/MCP-SmartEdit/releases)
+[![Version](https://img.shields.io/badge/version-v0.7.1-blue)](https://github.com/ERambler/MCP-SmartEdit/releases)
 [![CI](https://github.com/ERambler/MCP-SmartEdit/actions/workflows/ci.yml/badge.svg)](https://github.com/ERambler/MCP-SmartEdit/actions/workflows/ci.yml)
 [![.NET](https://img.shields.io/badge/.NET-10-purple)](https://dotnet.microsoft.com/download/dotnet/10.0)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -173,7 +173,7 @@ Every mutation response carries: new `rev`, unified `diff`, bracket problems, an
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md). Highlights: v0.2 structure vision -> v0.3 batch/anchors/JSON errors -> v0.4 multi-agent collaboration -> v0.5 undo/goto/shared log + telemetry v2 -> v0.5.1 UTF-8 boundary fix -> v0.5.2 log-injection hardening + telemetry opt-out -> v0.5.3 debug-payload masking -> v0.6.0 startup update check -> v0.6.1 silent self-install -> v0.6.2 code outline in open + CI -> v0.6.3 self-contained asset + AOT experiment -> v0.7.0 stale-rev auto-recovery.
+See [CHANGELOG.md](CHANGELOG.md). Highlights: v0.2 structure vision -> v0.3 batch/anchors/JSON errors -> v0.4 multi-agent collaboration -> v0.5 undo/goto/shared log + telemetry v2 -> v0.5.1 UTF-8 boundary fix -> v0.5.2 log-injection hardening + telemetry opt-out -> v0.5.3 debug-payload masking -> v0.6.0 startup update check -> v0.6.1 silent self-install -> v0.6.2 code outline in open + CI -> v0.6.3 self-contained asset + AOT experiment -> v0.7.0 stale-rev auto-recovery -> v0.7.1 bracket-check anchors + insert-diff fix.
 
 ## Roadmap & TODO
 

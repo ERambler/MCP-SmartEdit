@@ -486,6 +486,34 @@ static class V02Features {
         SelfTest.Check(s3.CheckBrackets(0, 0).Count == 0,
             "brackets: интерполяция (многострочный вызов + {{ }} + кавычки в дырке) чиста");
         s3.Dispose();
+
+        // v0.7.1: якоря — каждый отчёт указывает на строку ОТКРЫВАЮЩЕЙ скобки
+        string anchors = Path.Combine(dir, "anchors.cs");
+        File.WriteAllText(anchors,
+            "class C {\n" +           // 1: '{' A — не закрыта (внешняя, в отчёте ПЕРВОЙ)
+            "    void M() {\n" +      // 2: '{' B — не закрыта
+            "        if (x > 0\n" +   // 3: '(' C — не закрыта
+            "            Do(1;\n" +   // 4: '(' D — не закрыта
+            "    }\n" +               // 5: '}' при открытой D → mismatch: якорь на line 4, ресинк
+            "}\n", new UTF8Encoding(false)); // 6: '}' при открытой C → mismatch: якорь на line 3
+        var s4 = EditSession.Open(anchors, null);
+        var probs = s4.CheckBrackets(0, 0);
+        SelfTest.CheckPublic(probs.Count > 0 && probs[0].StartsWith("line 5:") && probs[0].Contains("from line 4 ")
+            && probs[0].Contains("missing ')'"),
+            $"brackets: mismatch даёт якорь на открывающую ({probs.FirstOrDefault() ?? "ничего"})");
+        SelfTest.CheckPublic(probs.Any(p => p.StartsWith("line 1:") && p.Contains("never closed")),
+            "brackets: незакрытая внешняя '{' репортится на СВОЕЙ строке открытия");
+        SelfTest.CheckPublic(probs.Where(p => p.Contains("never closed")).Select(p => p.Split(':')[0]).SequenceEqual(new[] { "line 1", "line 2" }),
+            "brackets: незакрытые — в порядке исходника, внешняя первой (без каскада от ресинка)");
+        s4.Dispose();
+
+        string stray = Path.Combine(dir, "stray.cs");
+        File.WriteAllText(stray, "int a = 1;\n}\n", new UTF8Encoding(false));
+        var s5 = EditSession.Open(stray, null);
+        var strayProblems = s5.CheckBrackets(0, 0);
+        SelfTest.CheckPublic(strayProblems.Count == 1 && strayProblems[0].StartsWith("line 2:") && strayProblems[0].Contains("closes nothing"),
+            $"brackets: лишняя закрывающая — строка закрытия + «closes nothing» ({string.Join("; ", strayProblems)})");
+        s5.Dispose();
     }
 
     public static void CalcTests() {
@@ -870,7 +898,9 @@ static class V070Stale {
 
         // B) без якоря: чужая вставка НИЖЕ диапазона — диапазон не тронут → авто-повтор
         var rB = Open(tools, Fresh("b"), out var docB);
-        docB.InsertAfter(9, "peer-tail", docB.Rev, false, actor: "peer");
+        var insB = docB.InsertAfter(9, "peer-tail", docB.Rev, false, actor: "peer");
+        SelfTest.CheckPublic(insB.Diff.Contains("nine") && insB.Diff.Contains("peer-tail") && !insB.Diff.Contains("seven"),
+            "insert diff: контекст содержит ЯКОРНУЮ строку (nine), а не строку выше (seven)");
         var resB = JsonSerializer.Deserialize<MutationResult>(
             Call(tools, $$"""{"session_id":"{{rB.SessionId}}","start":3,"end":4,"new_text":"EDITED","expected_rev":0,"retry_on_stale":true}"""),
             RpcJson.Default.MutationResult)!;
