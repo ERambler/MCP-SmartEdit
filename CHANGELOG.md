@@ -1,6 +1,11 @@
 # Changelog
 
-## v0.8.1 (2026-11-12)
+## v0.8.2 (2026-11-12)
+
+- **unlock-when-clean (#14)**: a CLEAN session no longer holds its file handle between tool calls — git, formatters and scripts can write freely (regression: a v0.8.1 release commit went out incomplete because an idle clean session locked `MetaTools.cs` and the surrounding pipeline continued). The invariant is now ironclad: **DIRTY ⇒ the file is held (piece-table base protection); clean ⇒ the handle exists only for the duration of a tool call** (acquire/revive in `ToolOps.LockedAsync`, release in `finally`). Transparent to the agent: an external change while released → the next call silently starts fresh (rev=0, history cleared — old revisions belong to the replaced file); file deleted/moved → `disk_conflict` with a retry hint, never an NRE. Selftested: clean-with-live-attachment writable, dirty held, save releases, external replace resets, deletion → disk_conflict
+- Skill/docs updated: the "close before external writes" ritual is GONE for clean sessions (it was papering over this bug)
+
+## v0.8.1 (2026-11-12) (2026-11-12)
 
 - **`help` tool — self-documenting API** (consilium: "the cheapest token win — one call instead of 5 rounds of reverse-engineering"): one compact page with the tool map, `[start..end]` semantics, the rev protocol, and every error kind → exact next action. Plus a one-time invitation: `initialize` instructions point to it, and the FIRST tools/call of a process gets a second content block with the tip (never again in that session)
 - **(#1) Structured retry + unified error envelope**: every error payload now echoes `session_id` and carries machine-actionable `retry: {strategy: reissue_with_rev|reanchor|reread_range, start?, end?}` alongside the prose hint

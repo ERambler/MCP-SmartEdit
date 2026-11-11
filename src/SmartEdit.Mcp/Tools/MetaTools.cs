@@ -224,7 +224,8 @@ unterminated_literal/comment/hole; unterminated_literal anchors the OPENING line
 
 QUICKSTART
 open(path) → find(regex, context:2) → edit_batch(edits, expected_rev, expect_old anchors) → save → close
-(Disk philosophy: NOTHING touches the disk except save — edit freely, undo if wrong, save when happy.)
+(Disk philosophy: NOTHING touches the disk except save — edit freely, undo if wrong, save when happy.
+ Locks: a DIRTY session holds its file (protection); a CLEAN session never does — between tool calls the handle is released, so git/scripts/formatters can write freely. External change while released → next call transparently starts fresh (rev=0); file deleted → disk_conflict with retry_hint.)
 """;
         return Task.FromResult(page);
     }

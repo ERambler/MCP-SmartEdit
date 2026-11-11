@@ -73,6 +73,7 @@ public sealed class EditSession : IDisposable {
     DateTime _diskMtimeUtc;
     long _diskSize;
     bool _shadowKept; // discard-close грязной сессии: shadow не удалять (страховка несохранённых правок)
+    bool _sourceReleased; // #14: чистый документ отпустил хэндл файла между вызовами инструментов
 
     EditSession(string path) { Path = path; }
 
@@ -760,6 +761,41 @@ public sealed class EditSession : IDisposable {
     public void Dispose() {
         ReleaseResources();
         Gate.Dispose();
+    }
+
+    // ── #14 unlock-when-clean: Dirty ⇒ держим (защита piece-table базы); clean ⇒ хэндл только на время вызова ──
+
+    /// <summary>Хэндл файла отпущен (чистый документ вне вызова инструмента). Доступ — только через EnsureLive.</summary>
+    internal bool SourceReleased => _sourceReleased;
+
+    /// <summary>
+    /// Восстановить источник перед доступом (вызов ПОД Gate, из ToolOps.LockedAsync). Файл не менялся
+    /// (mtime/size) → тот же документ, rev сохранён. Менялся внешне → прозрачный сброс: Init с нуля,
+    /// rev=0, история/undo чисты (старые ревизии относятся к заменённому файлу). Файл исчез → disk_conflict.
+    /// </summary>
+    internal void EnsureLive() {
+        if (!_sourceReleased) return;
+        _sourceReleased = false;
+        var fi = new FileInfo(Path);
+        if (!fi.Exists)
+            throw new ToolException(ToolException.DiskConflict,
+                $"file {Path} disappeared while no tool call was in flight (deleted/moved externally) — call open again",
+                retryHint: "open(path) again after restoring the file");
+        if (fi.LastWriteTimeUtc == _diskMtimeUtc && fi.Length == _diskSize) {
+            _src = new MmapSource(Path); // тот же файл — база восстанавливается, документ идентичен
+            return;
+        }
+        Rev = 0; Dirty = false; LastMutation = null;
+        History.Clear(); PendingEdits.Clear();
+        Init(null); // файл заменили внешне: свежий документ (Init пересоздаёт _src/_pieces/outline); не-UTF-8 теперь → IOException с подсказкой reopen
+    }
+
+    /// <summary>Отпустить хэндл, если документ чист (вызов ПОД Gate, в finally обёртки). MemorySource хэндлов не держит.</summary>
+    internal void ReleaseIfClean() {
+        if (_sourceReleased || Dirty || _src is not MmapSource) return;
+        _src.Dispose();
+        _src = null!;
+        _sourceReleased = true;
     }
 
     // Close вызывается под Gate: семафор живёт дольше — его диспозит сам вызывающий (вне локера)

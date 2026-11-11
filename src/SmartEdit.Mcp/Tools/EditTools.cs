@@ -43,14 +43,26 @@ static class ToolOps {
     /// <summary>Все операции сессии — под её семафором.</summary>
     internal static async Task<T> LockedAsync<T>(EditSession s, Func<T> work) {
         await s.Gate.WaitAsync();
-        try { return work(); }
-        finally { s.Gate.Release(); }
+        try {
+            s.EnsureLive();   // #14: хэндл отпущен между вызовами — восстановить (или прозрачно сбросить при внешней замене)
+            return work();
+        }
+        finally {
+            s.ReleaseIfClean(); // #14: чистый документ не держит файл между вызовами (dirty держит — защита базы)
+            s.Gate.Release();
+        }
     }
 
     internal static async Task Locked(EditSession s, Action work) {
         await s.Gate.WaitAsync();
-        try { work(); }
-        finally { s.Gate.Release(); }
+        try {
+            s.EnsureLive();   // #14
+            work();
+        }
+        finally {
+            s.ReleaseIfClean();
+            s.Gate.Release();
+        }
     }
 
     internal static Regex CompileRegex(string pattern, bool ignoreCase) {
@@ -87,8 +99,11 @@ sealed class OpenTool : ITool {
         var (att, reused) = Sessions.Attach(path, args.GetNullableString("encoding"), note);
         var s = att.Doc;
         var peers = Sessions.Peers(s);
-        // v0.6.2 (#2): code outline прямо в open-ответе + прогрев кэша symbols — минус отдельный exploratory вызов
-        var (outlineSyms, outlineTotal, outlineTruncated) = await ToolOps.LockedAsync(s, () => BuildCodeOutline(s));
+        // v0.6.2 (#2): outline в open-ответе; preview читает строки — потому ВСЁ под одним замком (#14)
+        var (outlineSyms, outlineTotal, outlineTruncated, preview) = await ToolOps.LockedAsync(s, () => {
+            var o = BuildCodeOutline(s);
+            return (o.Outline, o.Total, o.Truncated, BuildPreview(s));
+        });
         return ToolOps.Json(new OpenResult {
             SessionId = att.Id,
             Path = s.Path,
@@ -103,7 +118,7 @@ sealed class OpenTool : ITool {
             CodeOutline = outlineSyms,
             CodeOutlineTotal = outlineTotal,
             CodeOutlineTruncated = outlineTruncated,
-            Preview = BuildPreview(s),
+            Preview = preview,
             Reused = reused,
             Peers = [.. peers.Select(p => new PeerDto {
                 SessionId = p.Id, Note = p.Note, Stale = p.Stale,

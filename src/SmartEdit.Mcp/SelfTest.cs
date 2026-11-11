@@ -50,6 +50,7 @@ public static class SelfTest {
         V080Literals.Run(dir);
         V081Help.Run(dir);
         V082Polish.Run(dir);
+        V082Lock.Run(dir);
         V03Features.BatchAndAnchors(dir);
         await V03Features.StructuredErrorsAsync(dir);
         V03Features.ReplaceAllTests(dir);
@@ -961,6 +962,7 @@ static class V070Stale {
             $$"""{"path":"{{path.Replace("\\", "\\\\")}}"}""").RootElement.Clone(), default).GetAwaiter().GetResult();
         var r = JsonSerializer.Deserialize<OpenResult>(json, RpcJson.Default.OpenResult)!;
         doc = Sessions.Get(r.SessionId).Doc;
+        doc.EnsureLive(); // #14: tool-вызов отпустил хэндл — прямые правки мимо обёртки требуют живого источника
         return r;
     }
 }
@@ -1137,6 +1139,65 @@ static class V080Literals {
         SelfTest.CheckPublic(scpp.CheckBrackets(0, 0).Count == 0,
             "lexer: C++ R\"delim(...)delim\" — сырая строка не ломает баланс");
         scpp.Dispose();
+    }
+}
+
+/// <summary>
+/// v0.8.2 (#14) unlock-when-clean: Dirty ⇒ держим файл (защита); clean ⇒ хэндл только на время вызова.
+/// Регрессия инцидента v0.8.1: чистая сессия блокировала git/скрипты (EBUSY) — коммит ушёл без доков.
+/// </summary>
+static class V082Lock {
+    public static void Run(string dir) {
+        var tools = new ToolRegistry();
+        tools.RegisterEditTools();
+        string nl = ((char)10).ToString();
+
+        // (a) ИНЦИДЕНТ-РЕГРЕССИЯ: open → tool-вызов (источник отпущен) → attachment ЖИВ → внешняя запись проходит
+        string a = Path.Combine(dir, "lock-a.txt");
+        File.WriteAllText(a, "x" + nl);
+        var ra = tools.CallAsync("open", JsonDocument.Parse($$"""{"path":"{{a.Replace("\\", "\\\\")}}"}""").RootElement.Clone(), default).GetAwaiter().GetResult();
+        var sid = JsonSerializer.Deserialize<OpenResult>(ra, RpcJson.Default.OpenResult)!.SessionId;
+        _ = tools.CallAsync("show", JsonDocument.Parse($$"""{"session_id":"{{sid}}","start":1,"end":1}""").RootElement.Clone(), default).GetAwaiter().GetResult();
+        bool cleanUnlocked = true;
+        try { File.WriteAllText(a, "external-ok" + nl); } catch (IOException) { cleanUnlocked = false; }
+        SelfTest.CheckPublic(cleanUnlocked, "lock: чистая сессия с живым attachment НЕ держит файл (регрессия #14)");
+
+        // (b) Dirty держит: правка без save → внешняя запись падает; save → отпускает
+        string b = Path.Combine(dir, "lock-b.txt");
+        File.WriteAllText(b, "y" + nl);
+        var rb = tools.CallAsync("open", JsonDocument.Parse($$"""{"path":"{{b.Replace("\\", "\\\\")}}"}""").RootElement.Clone(), default).GetAwaiter().GetResult();
+        var sidB = JsonSerializer.Deserialize<OpenResult>(rb, RpcJson.Default.OpenResult)!.SessionId;
+        _ = tools.CallAsync("replace_lines", JsonDocument.Parse($$"""{"session_id":"{{sidB}}","start":1,"end":1,"new_text":"EDIT","expected_rev":0}""").RootElement.Clone(), default).GetAwaiter().GetResult();
+        bool dirtyHeld = false;
+        try { File.WriteAllText(b, "must-fail" + nl); } catch (IOException) { dirtyHeld = true; }
+        SelfTest.CheckPublic(dirtyHeld, "lock: dirty-сессия держит файл (защита базы piece-table)");
+        _ = tools.CallAsync("save", JsonDocument.Parse($$"""{"session_id":"{{sidB}}"}""").RootElement.Clone(), default).GetAwaiter().GetResult();
+        bool afterSave = true;
+        try { File.WriteAllText(b, "after-save-ok" + nl); } catch (IOException) { afterSave = false; }
+        SelfTest.CheckPublic(afterSave, "lock: save отпускает файл");
+
+        // (c) Прозрачный сброс: внешняя замена → следующий tool-вызов видит НОВОЕ содержимое, rev 0
+        File.WriteAllText(b, "FRESH" + nl);
+        var sb2 = tools.CallAsync("show", JsonDocument.Parse($$"""{"session_id":"{{sidB}}","start":1,"end":1}""").RootElement.Clone(), default).GetAwaiter().GetResult();
+        var showB = JsonSerializer.Deserialize<ShowResult>(sb2, RpcJson.Default.ShowResult)!;
+        SelfTest.CheckPublic(showB.Text.Contains("FRESH") && showB.Rev == 0,
+            "lock: внешняя замена файла → прозрачный сброс (новое содержимое, rev=0)");
+
+        // (d) Файл исчез пока отпущен → внятный disk_conflict, не NRE
+        string d = Path.Combine(dir, "lock-d.txt");
+        File.WriteAllText(d, "z" + nl);
+        var rd2 = tools.CallAsync("open", JsonDocument.Parse($$"""{"path":"{{d.Replace("\\", "\\\\")}}"}""").RootElement.Clone(), default).GetAwaiter().GetResult();
+        var sidD = JsonSerializer.Deserialize<OpenResult>(rd2, RpcJson.Default.OpenResult)!.SessionId;
+        _ = tools.CallAsync("show", JsonDocument.Parse($$"""{"session_id":"{{sidD}}","start":1,"end":1}""").RootElement.Clone(), default).GetAwaiter().GetResult();
+        File.Delete(d);
+        ToolException? tex = null;
+        try { _ = tools.CallAsync("show", JsonDocument.Parse($$"""{"session_id":"{{sidD}}","start":1,"end":1}""").RootElement.Clone(), default).GetAwaiter().GetResult(); }
+        catch (ToolException t) { tex = t; }
+        SelfTest.CheckPublic(tex is not null && tex.Kind == ToolException.DiskConflict && tex.RetryHint is not null,
+            "lock: файл удалён между вызовами → disk_conflict с retry_hint (не NRE)");
+
+        // прибраться: явно закрываем чистую сессию (b/d — по пути сценариев выше)
+        _ = tools.CallAsync("close", JsonDocument.Parse($$"""{"session_id":"{{sid}}","discard":true}""").RootElement.Clone(), default).GetAwaiter().GetResult();
     }
 }
 
