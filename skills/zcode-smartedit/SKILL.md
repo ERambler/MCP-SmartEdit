@@ -53,7 +53,8 @@ and auto-recovery if a peer raced you.
 - Errors are JSON: `{"kind":"stale_rev|stale_conflict|anchor_mismatch|invalid_range|batch_overlap|too_large|…","current_rev":N}` — branch on `kind`
 - Empty file: `replace_lines(1, 0, text)` inserts the first lines (same `end=start-1` convention as batch)
 - Multi-agent: stale errors name the offender; `save` → `peers_dirty` while others are mid-flight; idle attachments auto-detach after 30 min
-- Close sessions when done (mmap holds the file); `close` right after `save`
+- **Locks (v0.8.2)**: clean sessions NEVER hold files between tool calls — git/scripts/formatters can write freely; a DIRTY session holds its file until save/close (protection). External change while released → next call starts fresh (rev=0); deletion → `disk_conflict`
+- Close sessions when done; `close` right after `save` (clean sessions no longer lock files — v0.8.2 — but closing frees RAM)
 
 ## If something looks wrong (abnormal — not a ritual)
 
