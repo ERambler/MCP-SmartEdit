@@ -70,6 +70,8 @@ public sealed class MutationResult {
     public string Diff { get; set; } = "";
     public bool DryRun { get; set; }
     public string[]? Brackets { get; set; } // проблемы баланса {}[]() после правки (null — не код/сухой прогон)
+    public bool Recovered { get; set; }              // v0.7 (#1): применено после auto-recovery из stale_rev
+    public string[]? Intervening { get; set; }       // что меняли чужие правки, пока твой rev устарел
 }
 
 public sealed class SaveResult {
@@ -176,6 +178,8 @@ public sealed class BatchResult {
     public bool DryRun { get; set; }
     public string[] Diffs { get; set; } = [];
     public string[]? Brackets { get; set; }
+    public bool Recovered { get; set; }          // v0.7 (#1)
+    public string[]? Intervening { get; set; }   // v0.7 (#1)
 }
 
 public sealed class ReplaceAllResult {

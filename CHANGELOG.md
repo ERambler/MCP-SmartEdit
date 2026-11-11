@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.7.0 (2026-11-11)
+
+- **`retry_on_stale`** (#1, P0 per telemetry — stale_rev was 8.6 % of replaces / 64 % of all errors): `replace_lines` and `edit_batch` accept `retry_on_stale: true` — on `stale_rev` they auto-retry **once**, and only when it is provably safe: the `expect_old` anchor still matches at the fresh rev, or the range was untouched by the intervening edits (line shifts are tracked through structured spans now recorded in the mutation history; the apply lands at the *shifted* coordinates). The response carries `recovered: true` + `intervening: ["r5 s876b8ca7: insert_after 9 (+1 lines)", …]` — what others did meanwhile. **Never a blind retry**: a semantically changed range returns a structured `stale_conflict` with the current text of the range in `current_text` ("both versions" without a separate `show`) and a `retry_hint`. Error payloads gained `retry_hint`/`current_text` fields. Undo/replace_all/unknown spans are conservatively unsafe. Without the flag the behavior is unchanged. Selftested: anchor intact, untouched range, hijacked range (conflict), top-insert shift math, whole-batch recovery, flag-off pass-through
+- AOT experiment fix: `-p:SelfContained=true` added (NETSDK1102 — AOT requires self-contained even though the csproj Release profile pins framework-dependent)
+
 ## v0.6.3 (2026-11-11)
 
 - **Self-contained asset** (#7): every release now ships `SmartEdit-sc-win-x64-vX.Y.Z.zip` (~85 MB single exe, no .NET runtime needed) alongside the framework-dependent one. `install.ps1` picks it automatically when no .NET 10 runtime is present — no more hard failure on runtime-less machines. The SC binary runs the full selftest gate in CI before release

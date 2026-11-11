@@ -44,6 +44,7 @@ public static class SelfTest {
         V053Security.DebugBrief();
         V054Update.Run(dir);
         V062Outline.Run(dir);
+        V070Stale.Run(dir);
         V03Features.BatchAndAnchors(dir);
         await V03Features.StructuredErrorsAsync(dir);
         V03Features.ReplaceAllTests(dir);
@@ -838,6 +839,94 @@ static class V062Outline {
                 .GetAwaiter().GetResult(), RpcJson.Default.OpenResult)!;
         SelfTest.CheckPublic(rb.CodeOutline is null && rb.TotalLines > 5000,
             "open: файл >5k строк — гейт экономит сканирование, code_outline null");
+    }
+}
+
+/// <summary>v0.7 (#1): stale-rev auto-recovery — retry-once, якорь/нетронутый диапазон/сдвиги, конфликт с «обоими версиями».</summary>
+static class V070Stale {
+    public static void Run(string dir) {
+        var tools = new ToolRegistry();
+        tools.RegisterEditTools();
+
+        // каждый сценарий — СВОЙ файл: Sessions.Attach переиспользует общий документ по пути
+        string Fresh(string tag) { // не static: захватывает dir из объёмлющего метода
+            string p = Path.Combine(dir, $"stale-{tag}.txt");
+            File.WriteAllText(p, "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine\nten\n", new UTF8Encoding(false));
+            return p;
+        }
+
+        static string Call(ToolRegistry tools, string json)
+            => tools.CallAsync("replace_lines", JsonDocument.Parse(json).RootElement.Clone(), default).GetAwaiter().GetResult();
+
+        // A) якорь цел: чужая правка вне диапазона, якорь на 3..3 валиден → авто-повтор, recovered=true
+        var rA = Open(tools, Fresh("a"), out var docA);
+        docA.ReplaceLines(1, 1, "PEER", docA.Rev, false, null, actor: "peer");
+        var resA = JsonSerializer.Deserialize<MutationResult>(
+            Call(tools, $$"""{"session_id":"{{rA.SessionId}}","start":3,"end":3,"new_text":"MINE","expected_rev":0,"expect_old":"three","retry_on_stale":true}"""),
+            RpcJson.Default.MutationResult)!;
+        SelfTest.CheckPublic(resA.Recovered && docA.GetLineText(3) == "MINE"
+            && resA.Intervening is { Length: > 0 } && resA.Intervening[0].Contains("peer"),
+            "stale-recovery: якорь цел → авто-повтор, recovered+intervening");
+
+        // B) без якоря: чужая вставка НИЖЕ диапазона — диапазон не тронут → авто-повтор
+        var rB = Open(tools, Fresh("b"), out var docB);
+        docB.InsertAfter(9, "peer-tail", docB.Rev, false, actor: "peer");
+        var resB = JsonSerializer.Deserialize<MutationResult>(
+            Call(tools, $$"""{"session_id":"{{rB.SessionId}}","start":3,"end":4,"new_text":"EDITED","expected_rev":0,"retry_on_stale":true}"""),
+            RpcJson.Default.MutationResult)!;
+        // после замены 2→1 строки всё ниже сдвигается вверх: peer-tail с 10-й уезжает на 9-ю
+        SelfTest.CheckPublic(resB.Recovered && docB.GetLineText(3) == "EDITED" && docB.GetLineText(9) == "peer-tail"
+            && resB.Intervening is { Length: 1 },
+            "stale-recovery: без якоря, диапазон не тронут → авто-повтор (intervening — только чужие)");
+
+        // C) без якоря: чужая правка ВНУТРИ диапазона → stale_conflict с текущим текстом, ничего не применено
+        var rC = Open(tools, Fresh("c"), out var docC);
+        int revBefore = docC.Rev;
+        docC.ReplaceLines(3, 3, "PEER-HIJACKED", docC.Rev, false, null, actor: "peer");
+        ToolException? texC = null;
+        try { Call(tools, $$"""{"session_id":"{{rC.SessionId}}","start":3,"end":4,"new_text":"X","expected_rev":0,"retry_on_stale":true}"""); }
+        catch (ToolException t) { texC = t; }
+        SelfTest.CheckPublic(texC is not null && texC.Kind == "stale_conflict"
+            && texC.CurrentText is { } ct && ct.Contains("PEER-HIJACKED")
+            && texC.RetryHint is not null && docC.Rev == revBefore + 1,
+            "stale-recovery: диапазон изменился → stale_conflict (текущий текст + hint), без слепого повтора");
+
+        // D) сдвиг: чужая вставка СВЕРХУ (+2 строки) → диапазон [3..4] применяется в сдвинутых [5..6]
+        var rD = Open(tools, Fresh("d"), out var docD);
+        docD.InsertAfter(0, "new top\nx2", docD.Rev, false, actor: "peer");
+        var resD = JsonSerializer.Deserialize<MutationResult>(
+            Call(tools, $$"""{"session_id":"{{rD.SessionId}}","start":3,"end":4,"new_text":"EDITED","expected_rev":0,"retry_on_stale":true}"""),
+            RpcJson.Default.MutationResult)!;
+        SelfTest.CheckPublic(resD.Recovered && docD.GetLineText(1) == "new top" && docD.GetLineText(2) == "x2"
+            && docD.GetLineText(5) == "EDITED" && docD.TotalLines == 11,
+            "stale-recovery: вставка сверху — диапазон применяется по сдвинутым координатам");
+
+        // E) edit_batch: якорная правка + безопасная безъярорная → весь батч восстановлен
+        var rE = Open(tools, Fresh("e"), out var docE);
+        docE.ReplaceLines(9, 9, "PEER9", docE.Rev, false, null, actor: "peer");
+        var resE = JsonSerializer.Deserialize<BatchResult>(
+            tools.CallAsync("edit_batch", JsonDocument.Parse(
+                $$"""{"session_id":"{{rE.SessionId}}","expected_rev":0,"retry_on_stale":true,"edits":[{"start":1,"end":1,"new_text":"ONE","expect_old":"one"},{"start":5,"end":6,"new_text":"FIVE-SIX"}]}""").RootElement.Clone(), default).GetAwaiter().GetResult(),
+            RpcJson.Default.BatchResult)!;
+        SelfTest.CheckPublic(resE.Recovered && resE.Applied == 2 && docE.GetLineText(1) == "ONE" && docE.GetLineText(5) == "FIVE-SIX",
+            "stale-recovery: edit_batch целиком восстановлен (якорь + нетронутый диапазон)");
+
+        // F) без retry_on_stale поведение прежнее: голый stale_rev
+        var rF = Open(tools, Fresh("f"), out var docF);
+        docF.ReplaceLines(1, 1, "PEER", docF.Rev, false, null, actor: "peer");
+        ToolException? texF = null;
+        try { Call(tools, $$"""{"session_id":"{{rF.SessionId}}","start":3,"end":3,"new_text":"X","expected_rev":0,"expect_old":"three"}"""); }
+        catch (ToolException t) { texF = t; }
+        SelfTest.CheckPublic(texF is not null && texF.Kind == "stale_rev",
+            "stale-recovery: без флага — прежний честный stale_rev");
+    }
+
+    static OpenResult Open(ToolRegistry tools, string path, out EditSession doc) {
+        var json = tools.CallAsync("open", JsonDocument.Parse(
+            $$"""{"path":"{{path.Replace("\\", "\\\\")}}"}""").RootElement.Clone(), default).GetAwaiter().GetResult();
+        var r = JsonSerializer.Deserialize<OpenResult>(json, RpcJson.Default.OpenResult)!;
+        doc = Sessions.Get(r.SessionId).Doc;
+        return r;
     }
 }
 

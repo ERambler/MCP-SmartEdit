@@ -51,4 +51,6 @@ public sealed class ToolErrorPayload {
     public string Message { get; set; } = "";
     public int? CurrentRev { get; set; }
     public int? TotalLines { get; set; }
+    public string? RetryHint { get; set; }  // v0.7 (#1): как выйти из ошибки
+    public string? CurrentText { get; set; } // v0.7 (#1): текущий текст спорного диапазона (stale_conflict)
 }

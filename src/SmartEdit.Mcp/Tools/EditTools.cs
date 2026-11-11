@@ -214,6 +214,7 @@ sealed class ReplaceLinesTool : ITool {
     public string Description =>
         "Replace lines start..end (1-based, inclusive) with new_text lines. new_text='' deletes the range; a lone trailing newline is ignored. " +
         "expected_rev must equal the current rev; on mismatch the error carries current_rev. " +
+        "retry_on_stale=true (#1): on stale_rev auto-retry ONCE at the fresh rev when it is provably safe — expect_old anchor still matches, or the range was untouched by the intervening edits (line shifts tracked); response gains recovered=true + intervening=[what others did]. Never blind: changed range → structured stale_conflict with the current text of the range. " +
         "expect_old (optional anchor): exact current text of the range — guards against wrong-line math (kind=anchor_mismatch names the line). " +
         "dry_run=true returns the diff without applying. For 2+ edits use edit_batch.";
     public string InputSchemaJson => """
@@ -224,6 +225,7 @@ sealed class ReplaceLinesTool : ITool {
           "new_text":{"type":"string","description":"replacement lines ('' = delete)"},
           "expect_old":{"type":"string","description":"optional anchor: exact current text of start..end"},
           "expected_rev":{"type":"integer"},
+          "retry_on_stale":{"type":"boolean","description":"auto-retry once on stale_rev when provably safe (anchor intact or range untouched); default false"},
           "dry_run":{"type":"boolean","description":"default false"}
         },"required":["session_id","start","end","new_text","expected_rev"]}
         """;
@@ -236,11 +238,74 @@ sealed class ReplaceLinesTool : ITool {
         string newText = args.GetString("new_text");
         int expectedRev = args.GetRequiredInt("expected_rev");
         bool dryRun = args.GetBool("dry_run");
-        var outcome = await ToolOps.LockedAsync(s, () => s.ReplaceLines(start, end, newText, expectedRev, dryRun, args.GetNullableString("expect_old"), att.Id));
+        string? expectOld = args.GetNullableString("expect_old");
+        bool retryOnStale = args.GetBool("retry_on_stale");
+        // retry живёт ВНУТРИ блокировки: между проверкой и повторным применением rev не двинется
+        var outcome = await ToolOps.LockedAsync(s, () => {
+            try { return s.ReplaceLines(start, end, newText, expectedRev, dryRun, expectOld, att.Id); }
+            catch (ToolException tex) when (tex.Kind == ToolException.StaleRev && retryOnStale) {
+                return StaleRecovery.RecoverReplace(s, att.Id, start, end, newText, expectedRev, dryRun, expectOld);
+            }
+        });
         return ToolOps.Json(new MutationResult {
             Rev = outcome.Rev, TotalLines = outcome.TotalLines, Diff = outcome.Diff, DryRun = outcome.DryRun,
             Brackets = outcome.Brackets?.ToArray(),
+            Recovered = outcome.Recovered, Intervening = outcome.Intervening?.ToArray(),
         }, RpcJson.Default.MutationResult);
+    }
+}
+
+/// <summary>
+/// v0.7 (#1) stale-rev auto-recovery: повтор ровно один раз, и только когда это ДОКАЗУЕМО безопасно —
+/// якорь expect_old совпадает на свежем реве, либо диапазон не тронут чужими мутациями (сдвиги строк
+/// отслежены через спаны истории). Слепых повторов нет: изменившийся диапазон → stale_conflict с текущим
+/// текстом («обе версии» без отдельного show) и retry_hint.
+/// </summary>
+static class StaleRecovery {
+    public static MutationOutcome RecoverReplace(EditSession s, string actor, int start, int end, string newText, int expectedRev, bool dryRun, string? expectOld) {
+        var intervening = s.MutationsSince(expectedRev); // снимок ДО re-apply: только чужие правки
+        if (expectOld is not null && s.AnchorMatches(start, end - start + 1, expectOld)) {
+            var oc = s.ReplaceLines(start, end, newText, s.Rev, dryRun, expectOld, actor);
+            return oc with { Recovered = true, Intervening = intervening };
+        }
+        if (expectOld is null && s.RangeSafeSince(start, end, expectedRev, out var rs, out var re)) {
+            var oc = s.ReplaceLines(rs, re, newText, s.Rev, dryRun, null, actor);
+            return oc with { Recovered = true, Intervening = intervening };
+        }
+        throw Conflict(s, start, end, expectedRev, expectOld is not null
+            ? "expect_old anchor no longer matches the current content"
+            : "range was touched by the intervening edits");
+    }
+
+    public static BatchOutcome RecoverBatch(EditSession s, string actor, List<BatchOp> ops, int expectedRev, bool dryRun) {
+        var intervening = s.MutationsSince(expectedRev); // снимок ДО re-apply
+        var shifted = new List<BatchOp>(ops.Count);
+        foreach (var op in ops) {
+            if (op.ExpectOld is not null && s.AnchorMatches(op.Start, op.End - op.Start + 1, op.ExpectOld)) { shifted.Add(op); continue; }
+            if (op.ExpectOld is null && s.RangeSafeSince(op.Start, op.End, expectedRev, out var rs, out var re)) { shifted.Add(op with { Start = rs, End = re }); continue; }
+            throw Conflict(s, op.Start, op.End, expectedRev, $"edit [{op.Start}..{op.End}] is no longer provably safe");
+        }
+        var oc = s.EditBatch(shifted, s.Rev, dryRun, actor);
+        return oc with { Recovered = true, Intervening = intervening };
+    }
+
+    static ToolException Conflict(EditSession s, int start, int end, int expectedRev, string why) =>
+        new("stale_conflict",
+            $"range [{start}..{end}] changed since rev {expectedRev} ({why}) — refusing blind apply; current text of the range follows",
+            currentRev: s.Rev, totalLines: s.TotalLines,
+            currentText: RangePreview(s, start, end),
+            retryHint: $"show {Math.Max(1, start - 2)}..{Math.Min(s.TotalLines, end + 2)} at rev {s.Rev}, then re-apply with expected_rev={s.Rev}");
+
+    /// <summary>Нумерованный текущий текст диапазона (≤40 строк) — «обе версии» прямо в ошибке.</summary>
+    static string RangePreview(EditSession s, int start, int end) {
+        int lo = Math.Max(1, start), hi = Math.Min(s.TotalLines, end);
+        if (hi < lo) return "(range is beyond the file)";
+        bool cut = hi - lo + 1 > 40;
+        if (cut) hi = lo + 39;
+        var sb = new System.Text.StringBuilder();
+        for (int i = lo; i <= hi; i++) sb.Append(i).Append('|').Append(s.GetLineText(i)).Append('\n');
+        if (cut) sb.Append("…\n");
+        return sb.ToString();
     }
 }
 

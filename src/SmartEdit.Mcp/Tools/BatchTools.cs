@@ -11,6 +11,7 @@ sealed class BatchTool : ITool {
     public string Description =>
         "Atomic series of line edits in ONE call: edits=[{start,end,new_text,expect_old?}]. " +
         "All ranges and expect_old anchors are validated BEFORE anything applies — one bad edit rejects the whole batch (nothing applied, kind=batch_overlap/anchor_mismatch says which). " +
+        "retry_on_stale=true (#1): on stale_rev auto-retry ONCE at the fresh rev — every edit must be provably safe (anchor intact, or range untouched with tracked line shifts); otherwise structured stale_conflict. " +
         "Line numbers are the CURRENT numbering for every edit: applied bottom-up, no shift math. " +
         "end = start-1 inserts before start. One rev bump total; response carries per-edit diffs in your order. dry_run=true → diffs only.";
     public string InputSchemaJson => """
@@ -23,6 +24,7 @@ sealed class BatchTool : ITool {
             "expect_old":{"type":"string","description":"optional anchor: exact current text of start..end; mismatch rejects the batch"}
           },"required":["start","end","new_text"]}},
           "expected_rev":{"type":"integer"},
+          "retry_on_stale":{"type":"boolean","description":"auto-retry once on stale_rev when every edit is provably safe; default false"},
           "dry_run":{"type":"boolean","description":"default false"}
         },"required":["session_id","edits","expected_rev"]}
         """;
@@ -32,6 +34,7 @@ sealed class BatchTool : ITool {
         var s = att.Doc;
         int expectedRev = args.GetRequiredInt("expected_rev");
         bool dryRun = args.GetBool("dry_run");
+        bool retryOnStale = args.GetBool("retry_on_stale");
         var ops = new List<BatchOp>();
         if (args.ValueKind == JsonValueKind.Object
             && args.TryGetProperty("edits", out var arr) && arr.ValueKind == JsonValueKind.Array) {
@@ -42,10 +45,16 @@ sealed class BatchTool : ITool {
                     e.GetString("new_text"), e.GetNullableString("expect_old")));
             }
         }
-        var outcome = await ToolOps.LockedAsync(s, () => s.EditBatch(ops, expectedRev, dryRun, att.Id));
+        var outcome = await ToolOps.LockedAsync(s, () => {
+            try { return s.EditBatch(ops, expectedRev, dryRun, att.Id); }
+            catch (ToolException tex) when (tex.Kind == ToolException.StaleRev && retryOnStale) {
+                return StaleRecovery.RecoverBatch(s, att.Id, ops, expectedRev, dryRun);
+            }
+        });
         return ToolOps.Json(new BatchResult {
             Rev = outcome.Rev, TotalLines = outcome.TotalLines, Applied = outcome.Applied, DryRun = outcome.DryRun,
             Diffs = outcome.Diffs.ToArray(), Brackets = outcome.Brackets?.ToArray(),
+            Recovered = outcome.Recovered, Intervening = outcome.Intervening?.ToArray(),
         }, RpcJson.Default.BatchResult);
     }
 }

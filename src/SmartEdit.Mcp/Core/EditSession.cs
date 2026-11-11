@@ -6,17 +6,19 @@ using SmartEdit.Mcp.Core.SymbolScan;
 namespace SmartEdit.Mcp.Core;
 
 public sealed record FindHit(int Line, string Preview, string? Snippet, string? Where);
-public sealed record MutationOutcome(int Rev, int TotalLines, string Diff, bool DryRun, List<string>? Brackets);
+public sealed record MutationOutcome(int Rev, int TotalLines, string Diff, bool DryRun, List<string>? Brackets, bool Recovered = false, List<string>? Intervening = null);
 public sealed record SaveOutcome(long BytesWritten, string? BackupPath, string Hash, string Encoding);
 public sealed record BatchOp(int Start, int End, string NewText, string? ExpectOld);
-public sealed record BatchOutcome(int Rev, int TotalLines, int Applied, List<string> Diffs, bool DryRun, List<string>? Brackets);
+public sealed record BatchOutcome(int Rev, int TotalLines, int Applied, List<string> Diffs, bool DryRun, List<string>? Brackets, bool Recovered = false, List<string>? Intervening = null);
 public sealed record ReplaceAllOutcome(int Rev, int TotalLines, int Occurrences, List<int> Lines, bool DryRun, List<string>? Brackets);
 
 /// <summary>Компенсирующая операция для undo: строки [Old ↔ New] на позиции Start (позиция — hint: undo ищет по содержимому).</summary>
 public sealed record InverseOp(int Start, List<string> Old, List<string> New);
 
 /// <summary>Запись истории мутаций общего документа (кто/что/когда; Ops — инверсии для undo, null = правка не отменяема).</summary>
-public sealed record HistoryEntry(int Rev, string Actor, string Desc, DateTime Ts, List<InverseOp>? Ops = null);
+/// <summary>Span мутации в её же координатах ДО применения: [SpanStart..SpanEnd] — задетые строки
+/// (SpanStart = SpanEnd+1 — точка вставки), SpanDelta — изменение числа строк. Null = неизвестно/undo → консервативно небезопасно.</summary>
+public sealed record HistoryEntry(int Rev, string Actor, string Desc, DateTime Ts, List<InverseOp>? Ops = null, int? SpanStart = null, int? SpanEnd = null, int? SpanDelta = null);
 
 /// <summary>
 /// Сессия редактирования одного файла: неизменяемая база (mmap или RAM) + piece table правок.
@@ -46,8 +48,8 @@ public sealed class EditSession : IDisposable {
     public HistoryEntry? LastMutation { get; private set; }
     /// <summary>actor → число правок с прошлого save (для peers_dirty-гарда и «своих» несохранённых).</summary>
     public Dictionary<string, int> PendingEdits { get; } = new();
-    public void RecordMutation(string? actor, string desc, List<InverseOp>? ops = null) {
-        var e = new HistoryEntry(Rev, actor ?? "?", desc, DateTime.Now, ops);
+    public void RecordMutation(string? actor, string desc, List<InverseOp>? ops = null, int? spanStart = null, int? spanEnd = null, int? spanDelta = null) {
+        var e = new HistoryEntry(Rev, actor ?? "?", desc, DateTime.Now, ops, spanStart, spanEnd, spanDelta);
         LastMutation = e;
         History.Add(e);
         if (History.Count > 50) History.RemoveRange(0, History.Count - 50);
@@ -296,6 +298,41 @@ public sealed class EditSession : IDisposable {
                 + (LastMutation is { } m ? $" (r{m.Rev} by {m.Actor}: {m.Desc} @ {m.Ts:HH:mm:ss})" : ""),
                 currentRev: Rev, totalLines: TotalLines);
     }
+    /// <summary>
+    /// (#1) Мутации с rev > sinceRev одной строкой каждая: «r5 alice: replace 3..4 (2 lines)» — что успели сделать чужие.
+    /// </summary>
+    public List<string> MutationsSince(int sinceRev) =>
+        History.Where(h => h.Rev > sinceRev).Select(h => $"r{h.Rev} {h.Actor}: {h.Desc}").ToList();
+
+    /// <summary>(#1) Якорь совпадает с текущим содержимым диапазона (включая число строк)?</summary>
+    internal bool AnchorMatches(int startLine, int count, string expectOld) {
+        var want = ParseLines(expectOld);
+        if (want.Count != count) return false;
+        for (int i = 0; i < count; i++)
+            if (GetLineText(startLine + i) != want[i]) return false;
+        return true;
+    }
+
+    /// <summary>
+    /// (#1) Диапазон [start..end] в координатах рева sinceRev не тронут чужими правками?
+    /// Идём по мутациям по порядку: пересечение по содержимому → небезопасно; мутации НИЖЕ
+    /// диапазона сдвигают его (delta), выше — не трогают. Точка вставки внутри диапазона — конфликт.
+    /// Undo / replace_all / неизвестный спан — консервативно небезопасно. Возвращает сдвинутые координаты.
+    /// </summary>
+    internal bool RangeSafeSince(int start, int end, int sinceRev, out int shiftedStart, out int shiftedEnd) {
+        shiftedStart = start; shiftedEnd = end; // присвоены на всех путях (ранний return false их не читает)
+        int rs = start, re = end;
+        foreach (var m in History) {
+            if (m.Rev <= sinceRev) continue;
+            if (m.SpanStart is not int s || m.SpanEnd is not int e || m.SpanDelta is not int delta) return false;
+            bool overlap = s <= e && s <= re && e >= rs;            // непустой спан задел диапазон
+            bool pointInside = s == e + 1 && rs - 1 <= e && e < re; // вставка внутрь диапазона
+            if (overlap || pointInside) return false;
+            if (e < rs) { rs += delta; re += delta; }               // мутация ниже — диапазон сдвинулся
+        }
+        shiftedStart = rs; shiftedEnd = re;
+        return true;
+    }
 
     /// <summary>Якорь expect_old: точный текущий текст диапазона (нормализация — как у new_text).</summary>
     void CheckAnchor(int startLine, int count, string expectOld) {
@@ -352,7 +389,8 @@ public sealed class EditSession : IDisposable {
         Dirty = true;
         WriteShadow();
         RecordMutation(actor, $"replace {start}..{end} ({newLines.Count} lines)",
-            Undoable(oldLines, newLines) ? [(new InverseOp(start, oldLines, newLines))] : null);
+            Undoable(oldLines, newLines) ? [(new InverseOp(start, oldLines, newLines))] : null,
+            spanStart: start, spanEnd: end, spanDelta: newLines.Count - (end - start + 1));
         int newEnd = start + newLines.Count; // + строка после: ловим осиротевшую закрывающую
         var brackets = BracketReport(Math.Max(1, start - 1), Math.Min(TotalLines, newEnd));
         return new MutationOutcome(Rev, TotalLines, diff, DryRun: false, Brackets: brackets);
@@ -379,7 +417,8 @@ public sealed class EditSession : IDisposable {
         Dirty = true;
         WriteShadow();
         RecordMutation(actor, $"insert_after {line} (+{newLines.Count} lines)",
-            Undoable([], newLines) ? [new InverseOp(line + 1, [], newLines)] : null);
+            Undoable([], newLines) ? [new InverseOp(line + 1, [], newLines)] : null,
+            spanStart: line + 1, spanEnd: line, spanDelta: newLines.Count); // точка вставки: пустой спан
         var brackets = BracketReport(Math.Max(1, line), Math.Min(TotalLines, line + newLines.Count + 1));
         return new MutationOutcome(Rev, TotalLines, diff, DryRun: false, Brackets: brackets);
     }
@@ -456,7 +495,8 @@ public sealed class EditSession : IDisposable {
         RecordMutation(actor, $"batch ×{plan.Length} ({first}..{last}, Δ{delta:+0;-0})",
             plan.All(p => Undoable(p.OldLines, p.NewLines))
                 ? [.. plan.OrderByDescending(p => p.Op.Start).Select(p => new InverseOp(p.Op.Start, p.OldLines, p.NewLines))]
-                : null);
+                : null,
+            spanStart: first, spanEnd: last, spanDelta: delta);
         var brackets = BracketReport(Math.Max(1, first - 1), Math.Min(TotalLines, last + Math.Max(delta, 0) + 4));
         return new BatchOutcome(Rev, TotalLines, plan.Length, [.. plan.Select(p => p.Diff)], DryRun: false, Brackets: brackets);
     }

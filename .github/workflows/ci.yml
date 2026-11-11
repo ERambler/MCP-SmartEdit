@@ -58,5 +58,5 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.x
-      - run: dotnet publish -c Release -r win-x64 -p:PublishAot=true -o win-x64/publish-aot src/SmartEdit.Mcp/SmartEdit.Mcp.csproj
+      - run: dotnet publish -c Release -r win-x64 -p:PublishAot=true -p:SelfContained=true -o win-x64/publish-aot src/SmartEdit.Mcp/SmartEdit.Mcp.csproj
       - run: win-x64/publish-aot/SmartEdit.Mcp.exe selftest

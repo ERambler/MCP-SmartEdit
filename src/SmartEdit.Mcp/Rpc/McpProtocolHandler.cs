@@ -7,7 +7,7 @@ namespace SmartEdit.Mcp.Rpc;
 
 /// <summary>Диспетчер MCP-методов: initialize, ping, tools/list, tools/call.</summary>
 public sealed class McpProtocolHandler(ToolRegistry tools) {
-    public const string ServerVersion = "0.6.3";
+    public const string ServerVersion = "0.7.0";
     public const string ProtocolVersion = "2025-06-18";
 
     /// <summary>
@@ -76,7 +76,7 @@ public sealed class McpProtocolHandler(ToolRegistry tools) {
             // ошибка инструмента = result с isError=true (спека MCP); текст — МАШИННЫЙ JSON
             Log.Error($"tool {name}{ArgsBrief(args)} → {tex.Kind}: {tex.Message}");
             return (Elem(ToolResult(JsonSerializer.Serialize(
-                new ToolErrorPayload { Kind = tex.Kind, Message = tex.Message, CurrentRev = tex.CurrentRev, TotalLines = tex.TotalLines },
+                new ToolErrorPayload { Kind = tex.Kind, Message = tex.Message, CurrentRev = tex.CurrentRev, TotalLines = tex.TotalLines, RetryHint = tex.RetryHint, CurrentText = tex.CurrentText },
                 RpcJson.Default.ToolErrorPayload), isError: true), RpcJson.Default.CallToolResult), null);
         }
         catch (Exception ex) {
