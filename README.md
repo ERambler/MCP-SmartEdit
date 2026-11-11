@@ -1,179 +1,180 @@
 # SmartEdit MCP
 
-Line-based текстовый редактор для LLM-агента: правки по номерам строк, без точного
-совпадения строк. Создан взамен ad-hoc python-скриптов при редактировании больших
-файлов (главный источник сбоев встроенного Edit — необходимость байт-точного
-`old_string`, который дрейфует после суммаризации контекста).
+**Line-based text editor for LLM agents.** A zero-dependency [Model Context Protocol](https://modelcontextprotocol.io) stdio server that lets coding agents edit files by **line numbers** — no byte-exact `old_string` to drift out of sync, no whole files loaded into context. Works with any MCP client: **ZCode, Claude Desktop, Cursor, Windsurf, Cline** and anything else that speaks stdio MCP.
 
-## Семантика
+[![Version](https://img.shields.io/badge/version-v0.5.1-blue)](https://github.com/ERambler/MCP-SmartEdit/releases)
+[![.NET](https://img.shields.io/badge/.NET-10-purple)](https://dotnet.microsoft.com/download/dotnet/10.0)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![MCP](https://img.shields.io/badge/MCP-stdio%20server-orange)](https://modelcontextprotocol.io)
+[![Selftest](https://img.shields.io/badge/selftest-%7E130%20checks%20ALL%20PASS-brightgreen)](#verification)
 
-- **open(path, encoding?)** → `session_id, rev, total_lines, encoding, crlf, outline, todo_count, preview`.
-  UTF-8 файлы любого размера (memory-mapped, стиль Notepad++). Не-UTF-8 — с явным
-  `encoding: cp1251 | utf-16le | utf-16be` (транскод в RAM, до 256 МБ; без параметра —
-  ошибка с подсказкой). Outline: markdown-заголовки + маркеры `<!-- sec: name -->` и
-  `// @sec: name`; отключён для файлов >512 МБ.
-- **show(session_id, start, end, max_chars?)** → нумерованные строки (1-based, включительно),
-  урезка по бюджету символов. Перед правкой диапазона — сначала show.
-- **find(session_id, regex, after_line?, max_hits?, ignore_case?)** → номера строк + превью ≤120 симв.
-- **replace_lines(session_id, start, end, new_text, expected_rev, dry_run?, expect_old?)** → замена диапазона.
-  `new_text=''` удаляет; одиночный завершающий `\n` в new_text игнорируется; `\r\n` нормализуется
-  к стилю файла. `expect_old` — опциональный якорь: точный текущий текст диапазона; мисматч → отказ
-  (`anchor_mismatch` с номером строки). `dry_run=true` возвращает diff без применения.
-- **insert_after(session_id, line, text, expected_rev, dry_run?)** — вставка после строки N (0 = в начало).
-- **edit_batch(session_id, edits[], expected_rev, dry_run?)** — атомарная серия правок одним вызовом:
-  `edits=[{start,end,new_text,expect_old?}]`, `end=start-1` → вставка. Все диапазоны и якоря
-  проверяются ДО применения — один кривой edits[i] отклоняет весь батч. Применение снизу вверх:
-  номера строк актуальны для всех правок без пересчёта сдвигов. Один rev-инкремент на батч.
-- **replace_all(session_id, find, replace, max_lines?, expected_rev, dry_run?)** — литеральная замена
-  (не regex) во всех строках, все вхождения в строке. Больше `max_lines` (200, макс 2000) совпавших
-  строк → отказ целиком: частичный rename ломает код. Один rev-инкремент.
-- **save(session_id, backup?, encoding?, force?)** — атомарно (temp+rename), бэкап
-  `<file>.smartedit-bak`, `encoding: keep` (по умолчанию — кодировка не портится) или `utf8`.
-  Отказывает при внешнем изменении файла (mtime/size), `force=true` перезаписывает.
-  **rev не меняется**: save не перенумеровывает строки.
-- **close(session_id, discard?)** — закрыть; при несохранённых правках требует `discard=true`.
+```text
+the #1 failure mode of built-in Edit tools:
+agent recomputes the file -> old_string no longer matches -> edit rejected -> tokens burned
 
-### rev-контракт и якоря (защита от дрейфа)
-
-Каждая мутация возвращает новый `rev`; следующая обязана передать его как `expected_rev`.
-Несовпадение → отказ с `current_rev` → агент повторяет. Rev ловит *внешний* дрейф (правки
-другой сессии/агента); **само-дрейф агента** (неверный подсчёт строк) ловит якорь `expect_old` —
-сервер сверяет, что в диапазоне действительно лежит ожидаемый текст. Для батчей якорь
-проверяется у каждого edits[i] до применения любой правки.
-
-### Ошибки — машинный JSON
-
-Ошибка инструмента = ответ `isError=true`, текст — JSON `{"kind":"…","message":"…","current_rev":N,"total_lines":M}`.
-Виды: `stale_rev | anchor_mismatch | invalid_range | invalid_args | unknown_session | disk_conflict |
-dirty_close | too_large | bad_regex | batch_overlap | error`. Агент ветвится по `kind`, не парсит прозу.
-
-### Надёжность
-
-- после каждой мутации — shadow-снапшот `<file>.smartedit-shadow` (для файлов ≤32 МБ);
-- mmap-сессия держит файл с `FileShare.Read|Delete`: внешний inplace-писатель блокирован,
-  транскод-сессии (cp1251/utf-16) файл не держат — их конфликты ловит mtime-чек;
-- сохранение всегда завершает правленые строки переводом строки (стиль файла); нетронутый
-  хвост без завершающего `\n` сохраняется как есть.
-
-## v0.2 — структурное зрение
-
-- **symbols(session_id, docs_only?)** — структура кода: C# (namespace/типы/члены + XML-doc), Python (class/def + docstring), JS/TS/Java/C++ (типы/функции, грубее), XML/HTML (дерево тегов). Номера строк совпадают с show/replace_lines; docs_only — только задокументированные.
-- **find(…, context=N)** — сниппеты вокруг вхождений + breadcrumb Ns.Class.Member (после symbols).
-- **check(session_id, start?, end?)** — аудит баланса {}[]() (для XML/HTML + <>); строки/комментарии/интерполяция исключены стейт-машиной (скобки кода внутри {дырок} `$"…"` считаются); после каждой правки проблемы (если есть) приходят прямо в ответе мутации.
-- **tree(path, pattern?)** — карта проекта: файлы (пути/строки/байты), C# сгруппированы по namespace; bin/obj/.git/node_modules пропускаются.
-- **file_info(path)** — кодировка/BOM/новлайны/атрибуты/размер без открытия сессии.
-- **convert(path, to, from?)** — перекодировка на месте (атомарно + .bak).
-- **calc(expression)** — точная арифметика: hex/bin, ^, !, функции, pi/e. LLM не должны считать в уме.
-- save теперь **по умолчанию keep** — исходная кодировка/BOM не портятся; utf8 — только по явному запросу.
-
-## v0.3 — залп и якоря
-
-- **edit_batch** — серия правок одним вызовом (см. выше): рефакторинги без построчных раунд-трипов.
-- **replace_all** — литеральный rename по всему файлу: находишь → заменяешь всё за один rev.
-- **expect_old** — контент-якорь на replace_lines и в каждом edits[i] батча.
-- **структурированные ошибки** — JSON `{kind, message, current_rev, total_lines}` вместо прозы.
-- save больше **не инкрементирует rev** (не перенумеровывает строки — контринтуитивный +1 убран).
-- check — **стриминговый** полный прогон (до 200k строк после правки; RAM не растёт), check(0,0) — весь файл любого размера.
-- tree(…, recent_hours=N) — только недавно изменённые файлы, плоский список, свежие сверху, с `modified_utc`.
-- BracketCheck/сканеры: `CodeStrip` (вынесен из CsSymbolScanner) понимает интерполяцию `$"…"` с дырками
-  (`{x}` — код, скобки считаются; `{{ }}` — экранированные; вложенные кавычки в дырках ок) — скип целых
-  `$"`-строк убран (он ломал баланс многострочных вызовов).
-- RPC: битый JSON → ответ `-32700` с `id:null` (спека JSON-RPC 2.0).
-- **sessions()** — диагностика: все открытые сессии (id/path/rev/dirty/строки). Забытая сессия = лок mmap (FileShare.Read) —
-  внешний писатель падает; первым делом `sessions()` при странных EBUSY/Access denied.
-- **close(discard=true) грязной сессии теперь оставляет shadow** на диске (ответ содержит путь) — несохранённые правки
-  можно вернуть копированием поверх; раньше discard удалял shadow безвозвратно (поймано на себе).
-
-## Ограничения
-
-- UTF-8: до ~2 ГБ (индекс строк 8 Б/строку в RAM; open ~1.6с/300МБ).
-- cp1251/utf-16: до 256 МБ (транскод в RAM при открытии).
-- find — полный проход (0.7с/300МБ), не индексный.
-- symbols — навигационная точность, не компиляторная: многострочные expression-bodied члены
-  могут «протекать» телом в члены класса; partial-классы не склеиваются;  в C# не проверяется.
-- symbols — до 500k строк/файл; скобочный автоточёт после правок — до 200k строк (дальше локально; check(0,0) — весь файл, стримингом).
-- скобочный аудит: сырые строковые литералы (`"""…"""` / `$$"""…"""`, C# 11+) стейт-машиной не распознаются —
-  скобки внутри них считаются кодом, возможны ложные срабатывания (JSON-схемы в исходниках SmartEdit — живой пример);
-  `$"…"`-интерполяция обрабатывается корректно.
-- Кодовые страницы (cp1251) требуют `Encoding.RegisterProvider(CodePagesEncodingProvider)` — уже в Program.
-
-## Сборка и запуск
-
-```
-dotnet build src/SmartEdit.Mcp -c Release
-dotnet run --project src/SmartEdit.Mcp -c Release -- selftest   # полный прогон (~30с, пишет в %TEMP%\smartedit-selftest)
-dotnet publish src/SmartEdit.Mcp -c Release -r win-x64          # publish/win-x64/SmartEdit.Mcp.exe (~0.7МБ)
+SmartEdit: find -> show -> replace_lines(41..52, "…", expected_rev=17) -> done.
+Nothing to mismatch. Ever.
 ```
 
-Publish-профиль: framework-dependent SingleFile + ReadyToRun (паттерн SupportOnlineChat —
-мгновенный старт без распаковки; требует установленный .NET 10). Native AOT — в roadmap:
-сериализация уже на source-gen (JsonSerializerContext), нужен только MSVC-линкер.
+---
 
-## Регистрация в ZCode (user-scope)
+## Why it exists
+
+| Built-in Edit / str_replace / apply_patch | SmartEdit |
+|---|---|
+| needs byte-exact `old_string` that **drifts** after context summarization | addresses lines by **number**, one integer `rev` guard |
+| whole file in context to edit it | `show`/`find` read only what is asked; mmap up to **~2 GB UTF-8** |
+| last writer wins — silent clobbering | named-offender conflicts: `stale_rev: (r17 by s3: replace 41..52 @ 12:33)` |
+| errors are prose | errors are **JSON**: `{"kind":"stale_rev","message":"…","current_rev":17}` |
+| no undo, no audit | **undo** (compensating mutations), shared cross-project **log** every agent can read |
+
+## Feature highlights (20 tools)
+
+- **Core editing** — `open` / `show` / `find` (regex + breadcrumbs) / `replace_lines` / `insert_after` / `save` / `close`
+- **`edit_batch`** — N edits in ONE atomic call: all ranges and anchors validated *before* anything applies (one bad edit rejects the whole batch), applied bottom-up so line numbers need no shift math, single rev bump
+- **`replace_all`** — literal (non-regex) rename across the whole file; refuses *entirely* if too many lines match (a partial rename would break code)
+- **`expect_old` anchors** — optional exact-content guard on any edit; catches the agent's own wrong-line math (rev only catches *external* drift)
+- **`undo`** — undo as a *compensating mutation*: new rev, recorded in history, safe with peers (locations re-found by content). `undo` after `undo` naturally redoes
+- **Multi-agent collaboration** — one shared document per file path: every editor sees one piece table and one rev; `open(path, note="why I'm here")` lists peers and recent edits; a stale edit names **who** changed **what** and **when**; `save` refuses with `peers_dirty` while other sessions have unsaved work
+- **Structure vision** — `symbols` / `goto` (C#, Python, JS/TS, Java, C/C++, XML/HTML), `tree` project map (C# namespaces), `check` bracket audit (interpolation-aware)
+- **Encoding safety (Windows-first)** — cp1251 / UTF-16 open + round-trip, `file_info`, `convert`; save keeps the original encoding by default
+- **Operability** — `log`: the shared journal of *all* sessions and processes (every call, every error kind, per-pid, rotated at 5 MB) that the agent itself can read and grep to retrace its own steps; `sessions` diagnostics
+- **`calc`** — exact arithmetic (hex/bin/`^`/`!`/functions); LLMs should not do mental math
+
+## Performance (measured, see [Verification](#verification))
+
+| Operation | Result |
+|---|---|
+| Cold start to full `tools/list` (R2R single-file) | **~220 ms** |
+| `open` 300 MB / 4.9 M lines (parallel line index) | **1.2 s** |
+| `find` regex over 300 MB | **0.6 s** |
+| `save` 300 MB (streamed, xxHash64 on the fly) | **1.5 s** |
+| Typical tool call | **< 1 ms** server-side (ms-precision in the journal) |
+
+Memory stays flat on giants: memory-mapped base + piece-table edits; `save` streams; bracket audit streams.
+
+## Field telemetry & research
+
+One day of dogfooding (the agent developing SmartEdit *through* SmartEdit), harvested from the shared journal:
+
+- 496 ok / 25 error calls; `replace_lines` 37 %, session lifecycle 43 %, `find`+`show` 15 %
+- **`stale_rev` was 8.6 % of replaces** (64 % of all errors) — roadmapped as P0: stale-recovery auto-retry with anchor revalidation
+- `symbols` used on only 3 of 86 opens despite being a flagship — v0.6 plan: code outline directly in the `open` response
+- The analysis uncovered and fixed a real v0.2-era bug: UTF-8 detection falsely rejected files whose Cyrillic landed exactly on the 4096-byte sample boundary ([fix](src/SmartEdit.Mcp/Core/EncodingDetect.cs), regression-tested)
+
+Design decisions were cross-reviewed with independent LLM consultants (DeepSeek R1 deep-think + ChatGPT, in parallel): the collaboration architecture scored 6/10 as first proposed and **8/10 after revisions** (global-rev guard kept, `peers_dirty` save guard added, adaptive presence/events instead of a per-response token tax, soft range-claims deferred). Closest alternative: [tumf/mcp-text-editor](https://github.com/tumf/mcp-text-editor) (hash-anchored patches) — SmartEdit differs by hybrid rev+anchor concurrency, structure vision, multi-agent presence and compensating undo.
+
+## Install
+
+**Requirement: [.NET 10 runtime](https://dotnet.microsoft.com/download/dotnet/10.0)** (framework-dependent single-file exe, ~1.4 MB). Windows x64 today; the code is pure BCL — `dotnet publish -r linux-x64` should work, feedback welcome.
+
+### Option A — one-liner for agents (PowerShell)
+
+```powershell
+irm https://raw.githubusercontent.com/ERambler/MCP-SmartEdit/main/install/install.ps1 | iex
+```
+
+Downloads the latest release to `%LOCALAPPDATA%\SmartEdit\bin`, runs the selftest, prints ready-to-paste client configs.
+
+### Option B — manual
+
+1. Download `SmartEdit-win-x64-vX.Y.Z.zip` from [Releases](https://github.com/ERambler/MCP-SmartEdit/releases), unzip (e.g. into `%LOCALAPPDATA%\SmartEdit\bin`)
+2. Sanity check: `SmartEdit.Mcp.exe selftest` — must print `ALL PASS` (exit code 0, CI-friendly)
+3. Register with your MCP client (below)
+
+### ZCode (user scope) — notes from our own bruises
+
+Config: `~/.zcode/cli/config.json` (create the `mcp` section if missing):
 
 ```json
 {
-  "command": "C:\\Users\\ERambler\\Documents\\Projects\\MCP\\SmartEdit\\win-x64\\publish\\SmartEdit.Mcp.exe",
-  "args": [],
-  "env": {}
+  "mcp": {
+    "servers": {
+      "smartedit": { "command": "C:\Users\YOU\AppData\Local\SmartEdit\bin\SmartEdit.Mcp.exe", "args": [] }
+    }
+  }
 }
 ```
 
-Инструменты появятся как `mcp__smartedit__open`, `__show`, `__find`, `__replace_lines`,
-`__insert_after`, `__save`, `__close`, `__symbols`, `__check`, `__tree`, `__calc`,
-`__file_info`, `__convert` (13) после перезапуска сессии.
+Learned the hard way:
 
-## Переменные окружения
+- **A skill file is NOT a server registration.** The skill only teaches *when* to call the tools; without the `mcp.servers` entry the `mcp__smartedit__*` tools never appear.
+- New server = **new chat session** (no hot reload). Restart the client or open a new conversation after editing the config.
+- The exe is **locked while a session uses it**: to upgrade, close chats / `Stop-Process -Name SmartEdit.Mcp`, overwrite, reopen.
+- An open session holds its file `FileShare.Read` — external writers get EBUSY until `close`. Intentional; call `sessions` if a file feels locked.
+- Optional companion skill (usage protocol, smart vs built-in edit): copy [`skills/zcode-smartedit/SKILL.md`](skills/zcode-smartedit/SKILL.md) to `~/.zcode/skills/smartedit/SKILL.md`.
 
-| Перемная | По умолчанию | Значение |
-|---|---|---|
-| `SMARTEDIT_DATA_DIR` | `%LOCALAPPDATA%\SmartEdit` | каталог лога |
-| `SMARTEDIT_LOG` | — | `debug` = логировать каждую RPC-строку |
+### Claude Desktop
 
-Лог: `%LOCALAPPDATA%\SmartEdit\mcp.log` (stdout занят JSON-RPC — туда писать нельзя).
+`%APPDATA%\Claude\claude_desktop_config.json`:
 
-## Архитектура (одним абзацем)
+```json
+{ "mcpServers": { "smartedit": { "command": "C:\Users\YOU\AppData\Local\SmartEdit\bin\SmartEdit.Mcp.exe" } } }
+```
 
-Транспорт — newline-delimited JSON-RPC 2.0 поверх сырых stdin/stdout (порт ядра
-SupportOnlineChat: без Console.*, UTF-8 без BOM, параллельный dispatch, strict envelope),
-сериализация source-generated (AOT-ready). Документ — memory-mapped база + piece table:
-правки выровнены по строкам, куски ссылаются на диапазоны исходных строк и вставленные
-UTF-8 буферы; show/find читают только запрошенное, save льёт поток с xxHash64 на лету.
-Индекс строк строится параллельным сканом (`0x0A`-безопасен в UTF-8). Сессии независимы,
-внутри — SemaphoreSlim. Rev-счётчик вместо хэша на мутацию: O(1) на гигантах.
+### Cursor / Windsurf / any stdio MCP client
 
-## v0.4 — коллаборация (один документ на файл)
+`~/.cursor/mcp.json` (or your client's equivalent) — same shape:
 
-Несколько агентов работают с файлом **без возможности молча перезаписать друг друга**:
+```json
+{ "mcpServers": { "smartedit": { "command": "C:\Users\YOU\AppData\Local\SmartEdit\bin\SmartEdit.Mcp.exe", "args": [] } } }
+```
 
-- **open(path, note?)** повторно на тот же путь = **подключение к общему документу** (`reused: true`, в ответе —
-  `peers`: кто в файле, заметки, несохранённые правки, stale-маркер + `recent`: последние мутации).
-- **Один piece table и один rev на всех.** Правка любого инкрементит rev для всех: сосед со старым rev получает
-  `stale_rev` с именем виновника — `r17 by s3: replace 41..52 (3 lines) @ 12:33` — перечитывает show и решает, лезть ли.
-- **История**: кольцевой буфер ≤50 мутаций {rev, actor, что, когда}. `show`/`find` у отставшего добавляют `events`
-  (только когда реально отстал — токен-налог нулевой в спокойном файле); **`sync(session_id, since_rev?)`** — явная
-  сверка перед большой правкой: rev + peers + события.
-- **save-гард `peers_dirty`**: если у соседей несохранённые правки — save отклонён, пока не подтвердить
-  (`force=true` публикует ВСЕ правки на диск). Один документ = одна истина; «частичный save только свой» — не бывает.
-- **close = detach**: не последний — просто отключается (документ жив у peers); последний гасит (dirty → discard/отказ,
-  shadow-страховка как раньше).
-- Ограничение: коллаборация — в пределах одного процесса сервера (один клиент ZCode = один процесс). Между процессами
-  (два окна) работает mtime-гард на save; push-уведомлений в MCP нет — только доставка в момент вызова (events/peers).
-- Ревью DS (deep_think): глобальный rev достаточно для корректности; soft intent-locks на диапазоны строк — v0.4.1,
-  если ложные конфликты на непересекающихся правках замучают. Оценка архитектуры после правок: 8/10.
+The server speaks standard MCP (initialize / tools/list / tools/call) over stdio with **no client-specific assumptions** — if your client supports MCP stdio servers, it supports SmartEdit.
 
-## v0.5 — полировка: undo, goto, общий журнал
+### Environment variables
 
-- **undo(n)** — отмена как КОМПЕНСИРУЮЩАЯ мутация (обе нейронки в один голос): новый rev, запись в историю
-  с обратными инверсиями → `undo` после `undo` естественно даёт redo. Локации ищутся по содержимому —
-  чужие правки не мешают; потерянная/неоднозначная локация → `undo_conflict` (все проблемы разом, ничего
-  не применяется). Правки >200 строк на сторону не инвертируются (`nothing_to_undo`).
-- **goto(name)** — символы по подстроке (классы/методы/поля/теги) с точными строками = show/replace_lines.
-- **log(tail/grep/level/errors_only)** — экстренная ручка: общий журнал всех процессов/проектов (каждый вызов
-  инструмента, ошибки с kind, pid). Журнал один на все чаты: межпроцессный мьютекс + `[pid N]` в каждой строке,
-  ротация 5 МБ (mcp.log.1/.2). Агент сам себе «прокручивает кринж» и ориентируется.
-- **Структура**: Sessions.cs (коллаб-модель) выделен; undo/goto в NavTools.cs; XML-доки на публичных API.
-- **Perf**: холодный старт до полного tools/list ~220 мс (R2R single-file), вызовы ~0,0 с (журнал пишет тайминги).
-- Консенсультации DS+ChatGPT: макросы НЕ нужны (модель — исполнитель макроса; аналог — parameterized recipes,
-  roadmap); таймеры/фоновые задачи — foot-gun без push (разрешены только инертные: прогрев кэшей, fs-watch).
-  Идеи-кандидаты v0.6: multi-file транзакции, attention-трекинг «правишь вслепую», semantic time machine.
+| Variable | Effect |
+|---|---|
+| `SMARTEDIT_DATA_DIR` | data dir (default `%LOCALAPPDATA%\SmartEdit`); the shared journal `mcp.log` lives there |
+| `SMARTEDIT_LOG=debug` | verbose protocol logging |
+
+## The 60-second tour
+
+```jsonc
+// 1. open — session, rev, outline, peers (multi-agent aware)
+open(path: "C:\\src\\BigFile.cs", note: "refactoring utils")
+// -> { sessionId: "sab12…", rev: 0, totalLines: 84213, peers: [...], recent: [...] }
+
+// 2. navigate — regex with context snippets + symbol breadcrumbs
+find(sessionId, regex: "EditSession\\(", context: 2)
+
+// 3. edit — by line numbers, anchored, atomic; diff + bracket audit come back in the response
+replace_lines(sessionId, start: 41, end: 52, new_text: "…", expected_rev: 0,
+              expect_old: "…exact current text of lines 41..52…")
+
+// 4. many edits at once — validated before applied, no shift math, one rev bump
+edit_batch(sessionId, edits: [
+  { start: 10, end: 12, new_text: "…", expect_old: "…" },
+  { start: 400, end: 400, new_text: "…" },
+  { start: 900, end: 899, new_text: "inserted" }   // end=start-1 -> insertion
+], expected_rev: 1)
+
+// 5. oops — undo is a compensating edit (undo twice = redo)
+undo(sessionId, n: 1, expected_rev: 2)
+
+// 6. persist — keeps the original encoding; refuses while peers have unsaved edits
+save(sessionId)   // peers_dirty if someone else is mid-flight; force:true publishes all
+```
+
+Every mutation response carries: new `rev`, unified `diff`, bracket problems, and (in shared files) the `events` you missed. Every error is JSON with a machine-readable `kind`.
+
+## Verification
+
+- `SmartEdit.Mcp.exe selftest` — ~130 checks: encodings (cp1251/UTF-16 round-trips, BOM, the 4096-boundary regression), rev-guard, anchors, batch atomicity, undo/redo/conflict, collaboration (reuse, named offender, peers_dirty, detach), log handle, 300 MB big-file flow, full protocol round-trip. Exit code 0/1 — used as the CI gate.
+- Cold-start and per-call timings measured on the release binary; per-call milliseconds are written to the shared journal (`log` tool) so anyone can audit performance.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md). Highlights: v0.2 structure vision -> v0.3 batch/anchors/JSON errors -> v0.4 multi-agent collaboration -> v0.5 undo/goto/shared log + telemetry v2 -> v0.5.1 UTF-8 boundary fix.
+
+## Roadmap
+
+- stale-rev auto-recovery (retry-once with anchor revalidation) — P0 per telemetry
+- code outline inside the `open` response (adoption fix for structure vision)
+- multi-file transactions (`edit_transaction` across sessions, commit-all-or-nothing)
+- self-contained + Native AOT builds, CI workflow
+
+## License
+
+[MIT](LICENSE) © ERambler
