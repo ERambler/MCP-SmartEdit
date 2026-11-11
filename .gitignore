@@ -1,0 +1,8 @@
+bin/
+obj/
+.vs/
+win-x64/
+*.user
+*.smartedit-bak
+*.smartedit-shadow
+*.smartedit-tmp
