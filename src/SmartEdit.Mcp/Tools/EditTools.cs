@@ -30,7 +30,8 @@ public static class EditToolsRegistration {
         tools.Register(new SyncTool()); // v0.4
         tools.Register(new LogTool());  // v0.5: экстренная ручка
         tools.Register(new UndoTool());
-        tools.Register(new GotoTool()); // v0.5: 20 инструментов
+        tools.Register(new GotoTool()); // v0.5
+        tools.Register(new HelpTool()); // v0.8.1: самодокументируемый API — 21 инструментов
     }
 }
 
@@ -87,7 +88,7 @@ sealed class OpenTool : ITool {
         var s = att.Doc;
         var peers = Sessions.Peers(s);
         // v0.6.2 (#2): code outline прямо в open-ответе + прогрев кэша symbols — минус отдельный exploratory вызов
-        var codeOutline = await ToolOps.LockedAsync(s, () => BuildCodeOutline(s));
+        var (outlineSyms, outlineTotal, outlineTruncated) = await ToolOps.LockedAsync(s, () => BuildCodeOutline(s));
         return ToolOps.Json(new OpenResult {
             SessionId = att.Id,
             Path = s.Path,
@@ -99,7 +100,9 @@ sealed class OpenTool : ITool {
             TodoCount = s.TodoCount,
             Usings = [.. s.Usings],
             Outline = s.Outline.Select(e => new OutlineDto { Line = e.Line, Level = e.Level, Title = e.Title }).ToArray(),
-            CodeOutline = codeOutline,
+            CodeOutline = outlineSyms,
+            CodeOutlineTotal = outlineTotal,
+            CodeOutlineTruncated = outlineTruncated,
             Preview = BuildPreview(s),
             Reused = reused,
             Peers = [.. peers.Select(p => new PeerDto {
@@ -114,20 +117,21 @@ sealed class OpenTool : ITool {
     /// Компактный code outline (issue #2): для кода ≤5k строк греем кэш symbols (пересчёт только при смене rev)
     /// и отдаём топ-50 символов kind/name/line — агенту больше не нужен отдельный вызов symbols для ориентирования.
     /// </summary>
-    internal static SymbolBriefDto[]? BuildCodeOutline(EditSession s) {
+    internal static (SymbolBriefDto[]? Outline, int Total, bool Truncated) BuildCodeOutline(EditSession s) {
         const int MaxLines = 5000, Top = 50;
-        if (s.TotalLines > MaxLines || !Core.SymbolScan.SymbolDispatcher.IsCode(s.Path)) return null;
+        if (s.TotalLines > MaxLines || !Core.SymbolScan.SymbolDispatcher.IsCode(s.Path)) return (null, 0, false);
         var scan = s.Symbols(docsOnly: false);
         var list = new List<SymbolBriefDto>(64);
+        int total = 0;
         void Walk(IEnumerable<Core.SymbolScan.Symbol> symbols) {
             foreach (var sym in symbols) {
-                if (list.Count >= Top) return;
-                list.Add(new SymbolBriefDto { Line = sym.Line, Kind = sym.Kind, Name = sym.Name });
+                total++;
+                if (list.Count < Top) list.Add(new SymbolBriefDto { Line = sym.Line, Kind = sym.Kind, Name = sym.Name });
                 Walk(sym.Children);
             }
         }
         Walk(scan.Roots);
-        return list.Count > 0 ? [.. list] : null;
+        return (list.Count > 0 ? [.. list] : null, total, total > list.Count);
     }
 
     static string BuildPreview(EditSession s) {
@@ -202,7 +206,10 @@ sealed class FindTool : ITool {
         string[]? events = Presence.EventsSince(s, att);
         return ToolOps.Json(new FindResult {
             Rev = s.Rev,
-            Hits = hits.Select(h => new HitDto { Line = h.Line, Preview = h.Preview, Snippet = h.Snippet, Where = h.Where }).ToArray(),
+            Hits = hits.Select(h => new HitDto {
+                Line = h.Line, Preview = h.Preview, Snippet = h.Snippet, Where = h.Where,
+                Span = h.Snippet is null ? null : new SpanDto { Start = h.SpanStart, End = h.SpanEnd },
+            }).ToArray(),
             Truncated = truncated,
             Events = events,
         }, RpcJson.Default.FindResult);
@@ -295,7 +302,11 @@ static class StaleRecovery {
             $"range [{start}..{end}] changed since rev {expectedRev} ({why}) — refusing blind apply; current text of the range follows",
             currentRev: s.Rev, totalLines: s.TotalLines,
             currentText: RangePreview(s, start, end),
-            retryHint: $"show {Math.Max(1, start - 2)}..{Math.Min(s.TotalLines, end + 2)} at rev {s.Rev}, then re-apply with expected_rev={s.Rev}");
+            retryHint: $"show {Math.Max(1, start - 2)}..{Math.Min(s.TotalLines, end + 2)} at rev {s.Rev}, then re-apply with expected_rev={s.Rev}") {
+            RetryStrategy = "reread_range",
+            RetryStart = Math.Max(1, start - 2),
+            RetryEnd = Math.Min(s.TotalLines, end + 2),
+        };
 
     /// <summary>Нумерованный текущий текст диапазона (≤40 строк) — «обе версии» прямо в ошибке.</summary>
     static string RangePreview(EditSession s, int start, int end) {

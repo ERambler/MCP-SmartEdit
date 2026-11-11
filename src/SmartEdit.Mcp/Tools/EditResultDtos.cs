@@ -14,6 +14,8 @@ public sealed class OpenResult {
     public string[] Usings { get; set; } = [];
     public OutlineDto[] Outline { get; set; } = [];
     public SymbolBriefDto[]? CodeOutline { get; set; } // v0.6.2 (#2): топ-символы кода для файлов ≤5k строк (null = не код/слишком большой)
+    public int CodeOutlineTotal { get; set; }      // v0.8.1 (#2): сколько символов ВСЕГО
+    public bool CodeOutlineTruncated { get; set; } // v0.8.1 (#2): true = топ-50, НЕ весь файл
     public string Preview { get; set; } = "";
     public bool Reused { get; set; }            // v0.4: путь уже был открыт — подключение к общему документу
     public PeerDto[] Peers { get; set; } = [];  // кто сейчас в файле (id/note/несохранённые/stale)
@@ -62,6 +64,13 @@ public sealed class HitDto {
     public string Preview { get; set; } = "";
     public string? Snippet { get; set; }
     public string? Where { get; set; } // breadcrumb Ns.Class.Method (если symbols-кэш прогрет)
+    public SpanDto? Span { get; set; }  // v0.8.1 (#3): строки, которые покрывает snippet — редактируй без follow-up show
+}
+
+/// <summary>Диапазон строк (1-based, включительно).</summary>
+public sealed class SpanDto {
+    public int Start { get; set; }
+    public int End { get; set; }
 }
 
 public sealed class MutationResult {

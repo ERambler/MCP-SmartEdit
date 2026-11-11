@@ -14,6 +14,10 @@ public sealed class ToolException(
     public string? RetryHint { get; } = retryHint;
     /// <summary>#1: текущий текст спорного диапазона (stale_conflict) — «обе версии» без отдельного show.</summary>
     public string? CurrentText { get; } = currentText;
+    /// <summary>#1: машинная стратегия выхода: reissue_with_rev | reanchor | reread_range (+ диапазон при reread).</summary>
+    public string? RetryStrategy { get; init; }
+    public int? RetryStart { get; init; }
+    public int? RetryEnd { get; init; }
 
     public const string StaleRev = "stale_rev";
     public const string AnchorMismatch = "anchor_mismatch";

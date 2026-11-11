@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.8.1 (2026-11-12)
+
+- **`help` tool — self-documenting API** (consilium: "the cheapest token win — one call instead of 5 rounds of reverse-engineering"): one compact page with the tool map, `[start..end]` semantics, the rev protocol, and every error kind → exact next action. Plus a one-time invitation: `initialize` instructions point to it, and the FIRST tools/call of a process gets a second content block with the tip (never again in that session)
+- **(#1) Structured retry + unified error envelope**: every error payload now echoes `session_id` and carries machine-actionable `retry: {strategy: reissue_with_rev|reanchor|reread_range, start?, end?}` alongside the prose hint
+- **(#2) `code_outline` honesty**: open responses add `code_outline_total` + `code_outline_truncated` — the agent always knows whether it saw the whole file or just the top-50
+- **(#3) `find` span**: each hit with a snippet carries `span: {start, end}` — edit that range directly, no follow-up `show` round-trip
+- Selftests: 4 help checks + 3 polish checks; ~208 total, ALL PASS
+
+## v0.8.0 (2026-11-11)
+
+- **Universal literal lexer** (consilium-designed): ONE core + per-language profiles — C# raw `"""`/`$$"""`, Python triple/f-strings, JS template literals with nested `${}`, Java text blocks, C++ `R"delim(...)delim"`. Brackets stop lying about string contents; interpolation-hole code keeps its real braces (context stack for nested forms)
+- **Structured `diagnostics` in every edit response**: `[{line, code, message}]` with machine codes (`bracket_mismatch`, `never_closed`, `stray_closer`, `unterminated_literal/comment/hole`); unterminated literals anchor at the OPENING line
+- **`retry_on_stale` defaults to true** — provably-safe stale-rev recovery without asking
 
 ## v0.7.3 (2026-11-11)
 

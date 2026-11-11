@@ -52,6 +52,15 @@ public sealed class ToolErrorPayload {
     public string Message { get; set; } = "";
     public int? CurrentRev { get; set; }
     public int? TotalLines { get; set; }
-    public string? RetryHint { get; set; }  // v0.7 (#1): как выйти из ошибки
-    public string? CurrentText { get; set; } // v0.7 (#1): текущий текст спорного диапазона (stale_conflict)
+    public string? RetryHint { get; set; }  // prose-подсказка (человекочитаемо)
+    public string? CurrentText { get; set; } // текущий текст спорного диапазона (stale_conflict)
+    public string? SessionId { get; set; }  // v0.8.1 (#1): эхо сессии — единый конверт, агент не ищет контекст
+    public RetryDto? Retry { get; set; }    // v0.8.1 (#1): машинная стратегия вместо парсинга прозы
+}
+
+/// <summary>Машинная стратегия восстановления: strategy + диапазон для reread_range/reanchor.</summary>
+public sealed class RetryDto {
+    public string Strategy { get; set; } = "";  // reissue_with_rev | reanchor | reread_range
+    public int? Start { get; set; }
+    public int? End { get; set; }
 }

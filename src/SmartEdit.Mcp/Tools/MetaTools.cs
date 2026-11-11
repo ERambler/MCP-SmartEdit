@@ -178,3 +178,54 @@ sealed class LogTool : ITool {
         }, RpcJson.Default.LogResult));
     }
 }
+
+/// <summary>
+/// v0.8.1: самодокументируемый API — одна страница: карта инструментов, семантика диапазонов,
+/// rev-протокол, error kinds → действия. Консилиум: «самый дешёвый токен-выигрыш — один вызов
+/// вместо 5 раундов тыка». Плюс приглашение на первый tools/call в сессии (см. McpProtocolHandler).
+/// </summary>
+sealed class HelpTool : ITool {
+    public string Name => "help";
+    public string Description =>
+        "ONE page you can trust: tool map (one line each), [start..end] semantics (1-based inclusive, end=start-1 inserts, [1..0] = empty file), " +
+        "the rev protocol, and every error kind with the exact next action. Call it once at session start instead of reverse-engineering the API.";
+    public string InputSchemaJson => """{"type":"object","properties":{},"required":[]}""";
+
+    public Task<string> ExecuteAsync(JsonElement args, CancellationToken ct) {
+        const string page =
+"""
+SMARTEDIT — GOLDEN RULES
+- lines are 1-based, INCLUSIVE; end = start-1 => INSERT before start; empty file: replace_lines(1, 0, text)
+- expected_rev comes from YOUR last response (open => rev 0, each edit +1; save does NOT bump rev)
+- expect_old = exact current text of the range — your guard against your own wrong-line math
+- stale rev auto-recovers by default (response: recovered:true + intervening) — usually you do nothing
+- errors are JSON {kind,...} — branch on kind, never parse prose; machine retry: {strategy: reissue_with_rev|reanchor|reread_range, start?, end?}
+
+TOOL MAP
+navigate : open(path, note?) → sessionId, rev, code_outline(≤5k-line code, +total/truncated), peers | show(start,end,max_chars?)
+          find(regex, context:N) → lines+snippets+breadcrumbs+span{start,end} (edit the span, no follow-up show) | symbols / goto / tree | file_info
+edit     : replace_lines(start,end,new_text,expected_rev,expect_old?) | insert_after(line,text,expected_rev)
+          edit_batch(edits≤200, atomic, bottom-up = no shift math) | replace_all(literal, refuse-if-too-many)
+          undo(n, expected_rev) — undo×2 = redo, peer-safe compensating mutations
+lifecycle: save(keeps encoding; force=true publishes peers' edits too) | close(discard?) | sessions | sync
+ops      : check(bracket audit) | log(tail/grep/errors_only — shared journal) | calc(exact math) | convert(encoding)
+
+ERROR KINDS → ACTION
+stale_rev        → already auto-retried (see recovered/intervening); if you passed retry_on_stale:false → re-issue with current_rev
+stale_conflict   → the range changed under you: show(range from retry_hint), then re-apply with the fresh rev
+anchor_mismatch  → your line math is off — the error names the line, found vs expected; fix coords, don't force
+invalid_range / batch_overlap → fix coordinates; ranges in one batch must be disjoint
+unknown_session  → session gone (GC after 30 min idle?): open again
+peers_dirty      → someone mid-flight: wait, or save(force=true) publishes THEIR edits too
+disk_conflict    → file changed on disk since open: force=true overwrites
+too_large        → over a cap: split the work
+diagnostics (in every edit response): [{line, code, message}] — bracket_mismatch, never_closed, stray_closer,
+unterminated_literal/comment/hole; unterminated_literal anchors the OPENING line. [] = clean.
+
+QUICKSTART
+open(path) → find(regex, context:2) → edit_batch(edits, expected_rev, expect_old anchors) → save → close
+(Disk philosophy: NOTHING touches the disk except save — edit freely, undo if wrong, save when happy.)
+""";
+        return Task.FromResult(page);
+    }
+}

@@ -2,7 +2,7 @@
 
 **Line-based text editor for LLM agents.** A zero-dependency [Model Context Protocol](https://modelcontextprotocol.io) stdio server that lets coding agents edit files by **line numbers** — no byte-exact `old_string` to drift out of sync, no whole files loaded into context. Works with any MCP client: **ZCode, Claude Desktop, Cursor, Windsurf, Cline** and anything else that speaks stdio MCP.
 
-[![Version](https://img.shields.io/badge/version-v0.8.0-blue)](https://github.com/ERambler/MCP-SmartEdit/releases)
+[![Version](https://img.shields.io/badge/version-v0.8.1-blue)](https://github.com/ERambler/MCP-SmartEdit/releases)
 [![CI](https://github.com/ERambler/MCP-SmartEdit/actions/workflows/ci.yml/badge.svg)](https://github.com/ERambler/MCP-SmartEdit/actions/workflows/ci.yml)
 [![.NET](https://img.shields.io/badge/.NET-10-purple)](https://dotnet.microsoft.com/download/dotnet/10.0)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -174,7 +174,7 @@ Every mutation response carries: new `rev`, unified `diff`, structured `diagnost
 
 ## Changelog
 
-Full history in [CHANGELOG.md](CHANGELOG.md). Recent: **v0.8** honest brackets + anchored diagnostics + recovery by default; **v0.7** stale-rev auto-recovery, telemetry hygiene, session GC; **v0.6** update check with silent self-install, code outline in `open`, CI gate, self-contained asset.
+Full history in [CHANGELOG.md](CHANGELOG.md). Recent: **v0.8.1** self-documenting API (`help`, first-call tip) + structured retry/span/truncated; **v0.8** honest brackets + anchored diagnostics + recovery by default; **v0.7** stale-rev auto-recovery, telemetry hygiene, session GC; **v0.6** update check with silent self-install, code outline in `open`, CI gate, self-contained asset.
 
 ## License
 

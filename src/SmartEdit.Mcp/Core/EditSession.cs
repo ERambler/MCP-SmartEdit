@@ -5,7 +5,7 @@ using SmartEdit.Mcp.Core.SymbolScan;
 
 namespace SmartEdit.Mcp.Core;
 
-public sealed record FindHit(int Line, string Preview, string? Snippet, string? Where);
+public sealed record FindHit(int Line, string Preview, string? Snippet, string? Where, int SpanStart = 0, int SpanEnd = 0);
 public sealed record MutationOutcome(int Rev, int TotalLines, string Diff, bool DryRun, List<string>? Brackets, bool Recovered = false, List<string>? Intervening = null, List<BracketCheck.Diag>? Diags = null);
 public sealed record SaveOutcome(long BytesWritten, string? BackupPath, string Hash, string Encoding);
 public sealed record BatchOp(int Start, int End, string NewText, string? ExpectOld);
@@ -264,14 +264,15 @@ public sealed class EditSession : IDisposable {
             string line = GetLineText(i);
             if (rx.IsMatch(line)) {
                 string? snippet = null;
+                int spanA = i, spanB = i; // v0.8.1 (#3): строки, которые покрывает snippet — span прямо в хите
                 if (contextLines > 0) {
-                    int a = Math.Max(afterLine + 1, i - contextLines);
-                    int b = Math.Min(TotalLines, i + contextLines);
+                    spanA = Math.Max(afterLine + 1, i - contextLines);
+                    spanB = Math.Min(TotalLines, i + contextLines);
                     var sb = new StringBuilder();
-                    for (int j = a; j <= b; j++) sb.Append(j).Append('|').Append(TrimLong(GetLineText(j))).Append('\n');
+                    for (int j = spanA; j <= spanB; j++) sb.Append(j).Append('|').Append(TrimLong(GetLineText(j))).Append('\n');
                     snippet = sb.ToString();
                 }
-                hits.Add(new FindHit(i, Preview(line), snippet, WhereAmI(i)));
+                hits.Add(new FindHit(i, Preview(line), snippet, WhereAmI(i), spanA, spanB));
                 if (hits.Count >= maxHits) return (hits, true);
             }
         }
@@ -300,7 +301,7 @@ public sealed class EditSession : IDisposable {
             throw new ToolException(ToolException.StaleRev,
                 $"stale rev: got expected_rev={expectedRev}, current rev is {Rev} — retry with expected_rev={Rev}"
                 + (LastMutation is { } m ? $" (r{m.Rev} by {m.Actor}: {m.Desc} @ {m.Ts:HH:mm:ss})" : ""),
-                currentRev: Rev, totalLines: TotalLines);
+                currentRev: Rev, totalLines: TotalLines) { RetryStrategy = "reissue_with_rev" };
     }
     /// <summary>
     /// (#1) Мутации с rev > sinceRev одной строкой каждая: «r5 alice: replace 3..4 (2 lines)» — что успели сделать чужие.
@@ -350,7 +351,7 @@ public sealed class EditSession : IDisposable {
             if (h != w)
                 throw new ToolException(ToolException.AnchorMismatch,
                     $"expect_old mismatch at line {startLine + i}: found '{Preview(h)}', expected '{Preview(w)}'",
-                    currentRev: Rev, totalLines: TotalLines);
+                    currentRev: Rev, totalLines: TotalLines) { RetryStrategy = "reanchor" };
         }
         throw new ToolException(ToolException.AnchorMismatch, "expect_old mismatch", currentRev: Rev, totalLines: TotalLines);
     }

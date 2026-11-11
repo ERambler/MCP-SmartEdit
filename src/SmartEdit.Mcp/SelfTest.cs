@@ -48,6 +48,8 @@ public static class SelfTest {
         V072SaveTorture.Run(dir);
         V073Harden.Run(dir);
         V080Literals.Run(dir);
+        V081Help.Run(dir);
+        V082Polish.Run(dir);
         V03Features.BatchAndAnchors(dir);
         await V03Features.StructuredErrorsAsync(dir);
         V03Features.ReplaceAllTests(dir);
@@ -284,7 +286,7 @@ public static class SelfTest {
         SelfTest.Check(err is null && res!.Value.GetProperty("serverInfo").GetProperty("name").GetString() == "smartedit", "proto: initialize");
 
         (res, err) = await h.HandleAsync(new RpcRequest { Method = "tools/list", Id = J("2") });
-        SelfTest.Check(err is null && res!.Value.GetProperty("tools").GetArrayLength() == 20, "proto: 20 инструментов");
+        SelfTest.Check(err is null && res!.Value.GetProperty("tools").GetArrayLength() == 21, "proto: 21 инструментов (v0.8.1 + help)");
 
         string p = Path.Combine(dir, "proto.txt");
         File.WriteAllText(p, "1\n2\n3\n");
@@ -1135,6 +1137,68 @@ static class V080Literals {
         SelfTest.CheckPublic(scpp.CheckBrackets(0, 0).Count == 0,
             "lexer: C++ R\"delim(...)delim\" — сырая строка не ломает баланс");
         scpp.Dispose();
+    }
+}
+
+/// <summary>v0.8.1 (#1-3): структурный retry, outline totals/truncated, find span.</summary>
+static class V082Polish {
+    public static void Run(string dir) {
+        const string Lf = "\n";
+        var tools = new ToolRegistry();
+        tools.RegisterEditTools();
+
+        // (#1) retry-структура: stale_conflict → reread_range + диапазон; stale_rev → reissue_with_rev
+        string c = Path.Combine(dir, "pol-retry.cs");
+        File.WriteAllText(c, string.Join(Lf, "class P {", "    void M() {", "        var s = \"old;\"", "    }", "}") + Lf);
+        var (att, _) = Sessions.Attach(c, null, null);
+        att.Doc.ReplaceLines(3, 3, "PEER", att.Doc.Rev, false, null, "peer");
+        ToolException? tex = null;
+        try { tools.CallAsync("replace_lines", JsonDocument.Parse(
+            $$"""{"session_id":"{{att.Id}}","start":3,"end":4,"new_text":"X","expected_rev":0,"retry_on_stale":true}""").RootElement.Clone(), default).GetAwaiter().GetResult(); }
+        catch (ToolException t) { tex = t; }
+        SelfTest.CheckPublic(tex is not null && tex.RetryStrategy == "reread_range" && tex.RetryStart == 1 && tex.RetryEnd == 5,
+            $"polish: stale_conflict несёт retry {{strategy,range}} ({tex?.RetryStrategy})");
+        Sessions.Detach(att.Id, true);
+
+        // (#2) outline totals/truncated: >50 символов → truncated, всего честно
+        var sb2 = new StringBuilder("namespace Big {").Append(Lf);
+        for (int i = 1; i <= 55; i++) sb2.Append("class C").Append(i).Append(" { }").Append(Lf);
+        sb2.Append('}').Append(Lf);
+        string bigCs = Path.Combine(dir, "pol-outline.cs");
+        File.WriteAllText(bigCs, sb2.ToString());
+        var r2 = JsonSerializer.Deserialize<OpenResult>(
+            tools.CallAsync("open", JsonDocument.Parse($$"""{"path":"{{bigCs.Replace("\\", "\\\\")}}"}""").RootElement.Clone(), default).GetAwaiter().GetResult(),
+            RpcJson.Default.OpenResult)!;
+        SelfTest.CheckPublic(r2.CodeOutline!.Length == 50 && r2.CodeOutlineTruncated && r2.CodeOutlineTotal == 56,
+            $"polish: outline truncated=({r2.CodeOutline!.Length}/{r2.CodeOutlineTotal}) — агент знает полноту");
+
+        // (#3) find span: context=2 → span вокруг хита
+        string f = Path.Combine(dir, "pol-find.txt");
+        File.WriteAllText(f, string.Join(Lf, "a", "b", "NEEDLE", "d", "e") + Lf);
+        var (att2, _) = Sessions.Attach(f, null, null);
+        var fr = JsonSerializer.Deserialize<FindResult>(
+            tools.CallAsync("find", JsonDocument.Parse(
+                $$"""{"session_id":"{{att2.Id}}","regex":"NEEDLE","context":2}""").RootElement.Clone(), default).GetAwaiter().GetResult(),
+            RpcJson.Default.FindResult)!;
+        SelfTest.CheckPublic(fr.Hits[0].Span is { Start: 1, End: 5 },
+            "polish: find hit несёт span {1..5} — редактируй без follow-up show");
+        Sessions.Detach(att2.Id, true);
+    }
+}
+
+/// <summary>v0.8.1: help — самодокументируемый API; приглашение на первый tools/call сессии.</summary>
+static class V081Help {
+    public static void Run(string dir) {
+        var tools = new ToolRegistry();
+        tools.RegisterEditTools();
+        var page = tools.CallAsync("help", JsonDocument.Parse("{}").RootElement.Clone(), default).GetAwaiter().GetResult();
+        SelfTest.CheckPublic(page.Contains("1-based") && page.Contains("end = start-1") && page.Contains("[1..0]".Replace("[1..0]", "replace_lines(1, 0")),
+            "help: семантика диапазонов на странице");
+        SelfTest.CheckPublic(page.Contains("stale_conflict") && page.Contains("anchor_mismatch") && page.Contains("peers_dirty"),
+            "help: error kinds с действиями");
+        SelfTest.CheckPublic(new[] { "edit_batch", "replace_all", "undo", "goto", "sessions", "calc" }.All(t => page.Contains(t)),
+            "help: все ключевые инструменты в карте");
+        SelfTest.CheckPublic(page.Length < 6000, $"help: компактен ({page.Length} симв.) — один вызов, не простыня");
     }
 }
 

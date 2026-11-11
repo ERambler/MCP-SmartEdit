@@ -7,7 +7,7 @@ namespace SmartEdit.Mcp.Rpc;
 
 /// <summary>Диспетчер MCP-методов: initialize, ping, tools/list, tools/call.</summary>
 public sealed class McpProtocolHandler(ToolRegistry tools) {
-    public const string ServerVersion = "0.8.0";
+    public const string ServerVersion = "0.8.1";
     public const string ProtocolVersion = "2025-06-18";
 
     /// <summary>
@@ -45,7 +45,8 @@ public sealed class McpProtocolHandler(ToolRegistry tools) {
         return new InitializeResult {
             ProtocolVersion = clientVersion ?? ProtocolVersion,
             ServerInfo = new ServerInfoDto { Name = "smartedit", Version = ServerVersion },
-            Instructions = "Line-based text editor + code structure vision. open(path) → session_id, rev, usings, outline. " +
+            Instructions = "First contact? Call help() — the full API map in one response. " +
+            "Line-based text editor + code structure vision. open(path) → session_id, rev, usings, outline. " +
                 "symbols(session_id) → code structure with line numbers; docs_only=true → documented only. " +
                 "show(start,end) → numbered lines; find(regex, context=N) → line numbers + snippets + breadcrumbs. " +
                 "Mutations: replace_lines/insert_after (rev guard, dry_run, optional expect_old anchor), " +
@@ -70,13 +71,18 @@ public sealed class McpProtocolHandler(ToolRegistry tools) {
         try {
             string text = await tools.CallAsync(name, args, CancellationToken.None);
             if (TelemetryEnabled) Log.Info($"tool {name}{ArgsBrief(args)} → ok за {sw.Elapsed.TotalMilliseconds:0}мс");
-            return (Elem(ToolResult(text, isError: false), RpcJson.Default.CallToolResult), null);
+            return (Elem(WithFirstCallHint(ToolResult(text, isError: false), name), RpcJson.Default.CallToolResult), null);
         }
         catch (ToolException tex) {
             // ошибка инструмента = result с isError=true (спека MCP); текст — МАШИННЫЙ JSON
             Log.Error($"tool {name}{ArgsBrief(args)} → {tex.Kind}: {tex.Message}");
             return (Elem(ToolResult(JsonSerializer.Serialize(
-                new ToolErrorPayload { Kind = tex.Kind, Message = tex.Message, CurrentRev = tex.CurrentRev, TotalLines = tex.TotalLines, RetryHint = tex.RetryHint, CurrentText = tex.CurrentText },
+                new ToolErrorPayload {
+                    Kind = tex.Kind, Message = tex.Message, CurrentRev = tex.CurrentRev, TotalLines = tex.TotalLines,
+                    RetryHint = tex.RetryHint, CurrentText = tex.CurrentText,
+                    SessionId = args?.TryGetProperty("session_id", out var sid) == true && sid.ValueKind == JsonValueKind.String ? sid.GetString() : null,
+                    Retry = tex.RetryStrategy is null ? null : new RetryDto { Strategy = tex.RetryStrategy, Start = tex.RetryStart, End = tex.RetryEnd },
+                },
                 RpcJson.Default.ToolErrorPayload), isError: true), RpcJson.Default.CallToolResult), null);
         }
         catch (Exception ex) {
@@ -85,6 +91,18 @@ public sealed class McpProtocolHandler(ToolRegistry tools) {
                 new ToolErrorPayload { Kind = "error", Message = ex.Message },
                 RpcJson.Default.ToolErrorPayload), isError: true), RpcJson.Default.CallToolResult), null);
         }
+    }
+
+    static int _toolCalls; // счётчик для однократного приглашения help (v0.8.1)
+
+    /// <summary>Первый tools/call в жизни процесса (если это не сам help) получает вторую
+    /// content-строку с приглашением — агент гарантированно увидит, дальше тишина.</summary>
+    static CallToolResult WithFirstCallHint(CallToolResult r, string toolName) {
+        if (Interlocked.Increment(ref _toolCalls) != 1 || toolName == "help") return r;
+        r.Content = [.. r.Content, new TextContentDto {
+            Text = "SmartEdit tip (shown once): call help() — ONE page with the tool map, [start..end] semantics, and every error kind → exact next action.",
+        }];
+        return r;
     }
 
     static CallToolResult ToolResult(string text, bool isError) => new() {
