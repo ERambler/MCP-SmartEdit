@@ -70,7 +70,7 @@ sealed class OpenTool : ITool {
         "Open a text file as an edit session. Any size for UTF-8 (memory-mapped); non-UTF-8 needs encoding param (cp1251|utf-16le|utf-16be, up to 256MB). " +
         "note = why you're here (shown to other editors). Re-opening the SAME path reuses the shared document: one rev space for everyone — " +
         "the response lists peers (who's here, notes) and recent edits. " +
-        "Returns session_id, rev, total_lines, encoding, crlf, outline, todo_count, folded preview.";
+        "Returns session_id, rev, total_lines, encoding, crlf, outline (sections), code_outline (top-50 symbols for code files ≤5k lines), todo_count, folded preview.";
     public string InputSchemaJson => """
         {"type":"object","properties":{
           "path":{"type":"string","description":"absolute file path"},
@@ -79,14 +79,16 @@ sealed class OpenTool : ITool {
         },"required":["path"]}
         """;
 
-    public Task<string> ExecuteAsync(JsonElement args, CancellationToken ct) {
+    public async Task<string> ExecuteAsync(JsonElement args, CancellationToken ct) {
         string path = args.GetString("path");
         if (path == "") throw new ArgumentException("path is required");
         string? note = args.GetNullableString("note");
         var (att, reused) = Sessions.Attach(path, args.GetNullableString("encoding"), note);
         var s = att.Doc;
         var peers = Sessions.Peers(s);
-        return Task.FromResult(ToolOps.Json(new OpenResult {
+        // v0.6.2 (#2): code outline прямо в open-ответе + прогрев кэша symbols — минус отдельный exploratory вызов
+        var codeOutline = await ToolOps.LockedAsync(s, () => BuildCodeOutline(s));
+        return ToolOps.Json(new OpenResult {
             SessionId = att.Id,
             Path = s.Path,
             Rev = s.Rev,
@@ -97,6 +99,7 @@ sealed class OpenTool : ITool {
             TodoCount = s.TodoCount,
             Usings = [.. s.Usings],
             Outline = s.Outline.Select(e => new OutlineDto { Line = e.Line, Level = e.Level, Title = e.Title }).ToArray(),
+            CodeOutline = codeOutline,
             Preview = BuildPreview(s),
             Reused = reused,
             Peers = [.. peers.Select(p => new PeerDto {
@@ -104,7 +107,27 @@ sealed class OpenTool : ITool {
                 PendingEdits = s.PendingEdits.GetValueOrDefault(p.Id),
             })],
             Recent = [.. s.History.TakeLast(10).Select(h => $"r{h.Rev} {h.Actor}: {h.Desc}")],
-        }, RpcJson.Default.OpenResult));
+        }, RpcJson.Default.OpenResult);
+    }
+
+    /// <summary>
+    /// Компактный code outline (issue #2): для кода ≤5k строк греем кэш symbols (пересчёт только при смене rev)
+    /// и отдаём топ-50 символов kind/name/line — агенту больше не нужен отдельный вызов symbols для ориентирования.
+    /// </summary>
+    internal static SymbolBriefDto[]? BuildCodeOutline(EditSession s) {
+        const int MaxLines = 5000, Top = 50;
+        if (s.TotalLines > MaxLines || !Core.SymbolScan.SymbolDispatcher.IsCode(s.Path)) return null;
+        var scan = s.Symbols(docsOnly: false);
+        var list = new List<SymbolBriefDto>(64);
+        void Walk(IEnumerable<Core.SymbolScan.Symbol> symbols) {
+            foreach (var sym in symbols) {
+                if (list.Count >= Top) return;
+                list.Add(new SymbolBriefDto { Line = sym.Line, Kind = sym.Kind, Name = sym.Name });
+                Walk(sym.Children);
+            }
+        }
+        Walk(scan.Roots);
+        return list.Count > 0 ? [.. list] : null;
     }
 
     static string BuildPreview(EditSession s) {

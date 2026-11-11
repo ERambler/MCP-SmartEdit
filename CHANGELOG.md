@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.6.2 (2026-11-11)
+
+- **Code outline in the `open` response** (#2): opening a code file (C#, Python, JS/TS, Java, C/C++, markup) of ≤5000 lines now returns `code_outline` — the top 50 symbols (kind/name/line) — and warms the symbols cache (recomputed only on rev change). Kills the separate exploratory `symbols` call that telemetry showed agents skipping (3 uses / 86 opens). Non-code and oversized files omit the field. Selftested (symbols present, non-code null, >5k gate)
+- **CI** (#6): GitHub Actions workflow — every push/PR runs `dotnet build -c Release` + the full `selftest` gate; a `v*` tag additionally publishes the win-x64 zip and attaches it to a **draft release** (a human publishes after review). Release builds are no longer hand-rolled
+
 ## v0.6.1 (2026-11-11)
 
 - **Auto-install**: OK in the update dialog now *installs* the update — no user action beyond the click. The zip is downloaded to a temp dir, extracted, and the running binary replaces itself: Windows uses the rename dance (a running exe can't be overwritten but can be *renamed* → current file becomes `.exe.old`, the new exe takes its place, `.old` is cleaned up on the next start; rollback if the swap fails), Linux atomically overwrites its own binary. The new version takes effect on the next server start (a live process can't hot-swap). On failure the zip path is logged for a manual update. Dialog text now says "Install". Selftested (`ReplaceBinary` dance on temp files)

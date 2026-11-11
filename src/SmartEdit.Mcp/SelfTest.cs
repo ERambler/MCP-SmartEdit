@@ -43,6 +43,7 @@ public static class SelfTest {
         V051Detect.Utf8BoundaryCyrillic(dir);
         V053Security.DebugBrief();
         V054Update.Run(dir);
+        V062Outline.Run(dir);
         V03Features.BatchAndAnchors(dir);
         await V03Features.StructuredErrorsAsync(dir);
         V03Features.ReplaceAllTests(dir);
@@ -796,6 +797,47 @@ static class V054Update {
         if (OperatingSystem.IsWindows())
             SelfTest.CheckPublic(File.Exists(cur + ".old") && File.ReadAllText(cur + ".old") == "OLD",
                 "update: старый бинарник сохранён как .old (почистится при следующем старте)");
+    }
+}
+
+/// <summary>v0.6.2 (#2): code outline прямо в open-ответе для кода ≤5k строк.</summary>
+static class V062Outline {
+    public static void Run(string dir) {
+        var tools = new ToolRegistry();
+        tools.RegisterEditTools();
+
+        string cs = Path.Combine(dir, "v062_outline.cs");
+        File.WriteAllText(cs, """
+            namespace Demo;
+            class Alpha {
+                void One() { }
+                void Two() { }
+            }
+            class Beta { }
+            """, new UTF8Encoding(false));
+        var r = JsonSerializer.Deserialize<OpenResult>(
+            tools.CallAsync("open", JsonDocument.Parse($$"""{"path":"{{cs.Replace("\\", "\\\\")}}"}""").RootElement.Clone(), default)
+                .GetAwaiter().GetResult(), RpcJson.Default.OpenResult)!;
+        SelfTest.CheckPublic(r.CodeOutline is not null
+            && r.CodeOutline.Any(s => s.Name == "Alpha" && s.Kind == "class")
+            && r.CodeOutline.Any(s => s.Name == "One" && s.Kind == "method")
+            && r.CodeOutline.All(s => s.Line >= 1),
+            "open: code_outline с классами и методами прямо в ответе (#2)");
+
+        string txt = Path.Combine(dir, "v062_plain.txt");
+        File.WriteAllText(txt, "просто текст без символов");
+        var rt = JsonSerializer.Deserialize<OpenResult>(
+            tools.CallAsync("open", JsonDocument.Parse($$"""{"path":"{{txt.Replace("\\", "\\\\")}}"}""").RootElement.Clone(), default)
+                .GetAwaiter().GetResult(), RpcJson.Default.OpenResult)!;
+        SelfTest.CheckPublic(rt.CodeOutline is null, "open: не-код — code_outline отсутствует (null)");
+
+        string big = Path.Combine(dir, "v062_big.cs");
+        File.WriteAllText(big, "class Big {\n" + string.Join("\n", Enumerable.Repeat("    // filler", 5000)) + "\n}\n");
+        var rb = JsonSerializer.Deserialize<OpenResult>(
+            tools.CallAsync("open", JsonDocument.Parse($$"""{"path":"{{big.Replace("\\", "\\\\")}}"}""").RootElement.Clone(), default)
+                .GetAwaiter().GetResult(), RpcJson.Default.OpenResult)!;
+        SelfTest.CheckPublic(rb.CodeOutline is null && rb.TotalLines > 5000,
+            "open: файл >5k строк — гейт экономит сканирование, code_outline null");
     }
 }
 

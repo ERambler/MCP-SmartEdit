@@ -13,10 +13,18 @@ public sealed class OpenResult {
     public int TodoCount { get; set; }
     public string[] Usings { get; set; } = [];
     public OutlineDto[] Outline { get; set; } = [];
+    public SymbolBriefDto[]? CodeOutline { get; set; } // v0.6.2 (#2): топ-символы кода для файлов ≤5k строк (null = не код/слишком большой)
     public string Preview { get; set; } = "";
     public bool Reused { get; set; }            // v0.4: путь уже был открыт — подключение к общему документу
     public PeerDto[] Peers { get; set; } = [];  // кто сейчас в файле (id/note/несохранённые/stale)
     public string[] Recent { get; set; } = [];  // последние мутации общего документа
+}
+
+/// <summary>Компактная строка code-outline в open-ответе: kind/name/line без сигнатур и детей.</summary>
+public sealed class SymbolBriefDto {
+    public int Line { get; set; }
+    public string Kind { get; set; } = "";
+    public string Name { get; set; } = "";
 }
 
 public sealed class PeerDto {
