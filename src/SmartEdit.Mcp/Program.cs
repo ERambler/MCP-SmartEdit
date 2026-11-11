@@ -15,6 +15,7 @@ Log.Info($"SmartEdit MCP v{McpProtocolHandler.ServerVersion} запускает�
 
 // v0.6: фоновая проверка обновлений (GitHub latest release → системный диалог); stdio не блокируется.
 // Выключить: --no-update или SMARTEDIT_NO_UPDATE_CHECK=1
+UpdateCheck.CleanupOldBinary(); // подчистить .exe.old от прошлой самозамены (v0.6.1)
 UpdateCheck.RunIfNeeded(args);
 
 var tools = new ToolRegistry();

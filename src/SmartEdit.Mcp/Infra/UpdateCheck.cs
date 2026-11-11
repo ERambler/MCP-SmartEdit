@@ -13,7 +13,8 @@ namespace SmartEdit.Mcp.Infra;
 /// Выключить: аргумент --no-update или SMARTEDIT_NO_UPDATE_CHECK=1|true|yes.
 /// Windows — MessageBoxW (user32); Linux — zenity/kdialog/xmessage при наличии графической среды
 /// (DISPLAY/WAYLAND_DISPLAY); без неё или без утилит — только запись в журнал (агент увидит через log).
-/// ОК → zip релиза скачивается в &lt;DataRoot&gt;\downloads и открывается папка; подменять работающий exe не берёмся.
+/// ОК → zip скачивается, распаковывается и МОЛЧА заменяет текущий бинарник (без участия пользователя);
+/// новая версия вступает в силу при следующем запуске сервера.
 /// </summary>
 public static class UpdateCheck {
     const string Repo = "ERambler/MCP-SmartEdit";
@@ -73,7 +74,7 @@ public static class UpdateCheck {
                 Log.Info($"update: доступна {tag} (у вас v{current}) — диалог не показан (нет графической среды?), скачать: github.com/{Repo}/releases");
                 return;
             }
-            if (ok == true) Download(tag!, assetUrl, assetName!);
+            if (ok == true) Install(tag!, assetUrl, assetName!);
             else WriteDeclined(DeclinedPath, tag!); // однократность: эту версию больше не предлагаем
         }
         catch (Exception ex) { Log.Debug($"update: проверка не удалась: {ex.Message}"); }
@@ -112,7 +113,7 @@ public static class UpdateCheck {
     internal static string PromptText(string tag, string current, string body) {
         var notes = body.Trim();
         if (notes.Length > 1200) notes = notes[..1200] + "…";
-        return $"Доступна новая версия {tag} (у вас v{current}).\n\n{notes}\n\nСкачать новую версию?";
+        return $"Доступна новая версия {tag} (у вас v{current}).\n\n{notes}\n\nУстановить новую версию?";
     }
 
     /// <summary>Диалог ОК/Отмена; null — показать не удалось (нет GUI) или пользователь не ответил (таймаут).</summary>
@@ -157,29 +158,72 @@ public static class UpdateCheck {
 
     static string Quote(string s) => s.Contains(' ') && !s.StartsWith('"') ? $"\"{s}\"" : s;
 
-    static void Download(string tag, string url, string assetName) {
+    /// <summary>
+    /// ОК в диалоге: скачать zip → распаковать → молча заменить собственный бинарник.
+    /// Участия пользователя больше не требуется; новая версия вступает в силу при следующем запуске сервера.
+    /// </summary>
+    static void Install(string tag, string url, string assetName) {
+        var work = Path.Combine(Path.GetTempPath(), "smartedit-update");
         try {
-            var dir = Path.Combine(AppPaths.DataRoot, "downloads");
-            Directory.CreateDirectory(dir);
-            var path = Path.Combine(dir, assetName);
+            var exe = Environment.ProcessPath;
+            if (exe is null) { Log.Warn("update: не удалось определить путь своего exe — установка отменена"); return; }
+
+            try { Directory.Delete(work, true); } catch { }
+            Directory.CreateDirectory(work);
+            var zip = Path.Combine(work, assetName);
             using (var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5)))
-            using (var http = new HttpClient())
-            using (var rsp = http.GetAsync(url, cts.Token).GetAwaiter().GetResult()) {
+            using (var http = new HttpClient()) {
+                http.DefaultRequestHeaders.UserAgent.ParseAdd("SmartEdit-MCP-update-check");
+                using var rsp = http.GetAsync(url, cts.Token).GetAwaiter().GetResult();
                 if (!rsp.IsSuccessStatusCode) { Log.Warn($"update: загрузка {tag} → HTTP {(int)rsp.StatusCode}"); return; }
-                using var fs = File.Create(path);
+                using var fs = File.Create(zip);
                 rsp.Content.CopyToAsync(fs, cts.Token).GetAwaiter().GetResult();
             }
-            Log.Info($"update: {tag} загружена → {path}");
-            OpenFolder(dir);
+
+            var extract = Path.Combine(work, "x");
+            System.IO.Compression.ZipFile.ExtractToDirectory(zip, extract);
+            var newExe = Path.Combine(extract, Path.GetFileName(exe));
+            if (!File.Exists(newExe)) {
+                Log.Warn($"update: в {assetName} нет {Path.GetFileName(exe)} — установка отменена, zip: {zip}");
+                return;
+            }
+
+            ReplaceBinary(exe, newExe);
+            Log.Info($"update: {tag} установлена в {exe} — вступит в силу при следующем запуске сервера");
+            try { Directory.Delete(work, true); } catch { }
         }
-        catch (Exception ex) { Log.Warn($"update: загрузка не удалась: {ex.Message}"); }
+        catch (Exception ex) {
+            Log.Warn($"update: установка не удалась: {ex.Message}" +
+                (File.Exists(Path.Combine(work, assetName)) ? $" — zip для ручного обновления: {Path.Combine(work, assetName)}" : ""));
+        }
     }
 
-    static void OpenFolder(string dir) {
-        try {
-            if (OperatingSystem.IsWindows()) Process.Start("explorer.exe", $"\"{dir}\"");
-            else Process.Start(new ProcessStartInfo("xdg-open") { Arguments = dir, UseShellExecute = false });
+    /// <summary>
+    /// Замена бинарника на живом процессе: Windows не даёт перезаписать работающий exe, но разрешает
+    /// его ПЕРЕИМЕНОВАТЬ — текущий файл уходит в .exe.old, новый встаёт на его место (откат при неудаче);
+    /// .old удаляется при следующем старте (CleanupOldBinary). Linux позволяет атомарно заменить свой бинарник.
+    /// </summary>
+    internal static void ReplaceBinary(string exe, string newExe) {
+        if (OperatingSystem.IsWindows()) {
+            var old = exe + ".old";
+            try { File.Delete(old); } catch { }
+            File.Move(exe, old);
+            try { File.Move(newExe, exe); }
+            catch { File.Move(old, exe); throw; } // не остаться без exe
         }
-        catch (Exception ex) { Log.Debug($"update: открыть папку не удалось: {ex.Message}"); }
+        else {
+            File.Move(newExe, exe, overwrite: true);
+        }
+    }
+
+    /// <summary>Удалить .old от прошлой самозамены (файл держит старый процесс — потому чистим лишь когда он вышел).</summary>
+    internal static void CleanupOldBinary() {
+        try {
+            var exe = Environment.ProcessPath;
+            if (exe is null) return;
+            var old = exe + ".old";
+            if (File.Exists(old)) File.Delete(old);
+        }
+        catch { /* .old недоступен — старый процесс ещё жив, почистим в следующий раз */ }
     }
 }

@@ -785,6 +785,17 @@ static class V054Update {
             && !Infra.UpdateCheck.DisabledByArgs(Array.Empty<string>())
             && Infra.UpdateCheck.DisabledByArgs(new[] { "--NO-UPDATE", "selftest" }),
             "update: --no-update отключает проверку (регистронезависимо)");
+
+        // самозамена бинарника (rename dance) — на временных файлах, живой exe не трогаем
+        string inst = Path.Combine(dir, "install");
+        Directory.CreateDirectory(inst);
+        string cur = Path.Combine(inst, "SmartEdit.Mcp.exe"), neu = Path.Combine(inst, "new.exe");
+        File.WriteAllText(cur, "OLD"); File.WriteAllText(neu, "NEW");
+        Infra.UpdateCheck.ReplaceBinary(cur, neu);
+        SelfTest.CheckPublic(File.ReadAllText(cur) == "NEW", "update: бинарник заменён без участия пользователя");
+        if (OperatingSystem.IsWindows())
+            SelfTest.CheckPublic(File.Exists(cur + ".old") && File.ReadAllText(cur + ".old") == "OLD",
+                "update: старый бинарник сохранён как .old (почистится при следующем старте)");
     }
 }
 

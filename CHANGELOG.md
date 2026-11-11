@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.6.1 (2026-11-11)
+
+- **Auto-install**: OK in the update dialog now *installs* the update — no user action beyond the click. The zip is downloaded to a temp dir, extracted, and the running binary replaces itself: Windows uses the rename dance (a running exe can't be overwritten but can be *renamed* → current file becomes `.exe.old`, the new exe takes its place, `.old` is cleaned up on the next start; rollback if the swap fails), Linux atomically overwrites its own binary. The new version takes effect on the next server start (a live process can't hot-swap). On failure the zip path is logged for a manual update. Dialog text now says "Install". Selftested (`ReplaceBinary` dance on temp files)
+
 ## v0.6.0 (2026-11-11)
 
 - **Update check**: on startup the server fetches the GitHub latest release (background thread, 5 s timeout — stdio is never blocked). A newer version triggers a native system dialog with the release notes and OK/Cancel: **OK** downloads the release zip to `<DataRoot>\downloads` and opens the folder; **Cancel** is remembered per-version — a declined version is never offered again, the next release will ask. Windows: `MessageBoxW`; Linux: `zenity`/`kdialog`/`xmessage` under DISPLAY/WAYLAND_DISPLAY, headless → journal notice only. Kill switch: `--no-update` arg or `SMARTEDIT_NO_UPDATE_CHECK=1`. Selftested (version compare, decline memory, dialog text, kill switch); the full popup→download flow was verified live
