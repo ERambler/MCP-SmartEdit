@@ -31,7 +31,14 @@ jobs:
         with:
           dotnet-version: 10.x
       - run: dotnet publish -c Release -r win-x64 -o win-x64/publish src/SmartEdit.Mcp/SmartEdit.Mcp.csproj
-      - run: pwsh -NoProfile -Command "Compress-Archive -Path win-x64/publish/SmartEdit.Mcp.exe -DestinationPath ('win-x64/SmartEdit-win-x64-' + $env:GITHUB_REF_NAME + '.zip') -Force"
-      - run: gh release create "$env:GITHUB_REF_NAME" --draft --generate-notes "win-x64/SmartEdit-win-x64-$($env:GITHUB_REF_NAME).zip"
+      - name: zip asset
+        run: |
+          $zip = "win-x64/SmartEdit-win-x64-$env:GITHUB_REF_NAME.zip"
+          Compress-Archive -Path win-x64/publish/SmartEdit.Mcp.exe -DestinationPath $zip -Force
+          Get-Item $zip
+      - name: draft release with asset
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          gh release create $tag --draft --generate-notes "win-x64/SmartEdit-win-x64-$tag.zip"
         env:
           GH_TOKEN: ${{ github.token }}
