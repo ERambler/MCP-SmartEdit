@@ -71,7 +71,7 @@ Memory stays flat on giants: memory-mapped base + piece-table edits; `save` stre
 
 ## Install
 
-**Requirement: [.NET 10 runtime](https://dotnet.microsoft.com/download/dotnet/10.0)** (framework-dependent single-file exe, ~1.4 MB) — or pick the **self-contained** `SmartEdit-sc-win-x64-*.zip` asset (zero runtime dependencies; `install.ps1` chooses it automatically when no runtime is installed). Windows x64 today; the code is pure BCL — `dotnet publish -r linux-x64` should work, feedback welcome.
+**Requirement: [.NET 10 runtime](https://dotnet.microsoft.com/download/dotnet/10.0)** — the single framework-dependent artifact (~1.4 MB exe). Windows x64 today; the code is pure BCL — `dotnet publish -r linux-x64` should work, feedback welcome.
 
 ### Option A — one-liner for agents (PowerShell)
 
