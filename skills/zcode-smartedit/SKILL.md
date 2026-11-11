@@ -1,23 +1,25 @@
 ---
 name: smartedit
-description: Use the SmartEdit MCP tools (mcp__smartedit__*) INSTEAD of built-in Read/Edit for editing any file over ~150 lines, for multi-edit series, for exploring code structure (symbols/tree/goto), finding all occurrences with context, encoding work (cp1251/UTF-16), and exact arithmetic. Fires on file editing, large file refactoring, code navigation, calculations.
+description: Use the SmartEdit MCP tools (mcp__smartedit__*) INSTEAD of built-in Read/Edit for editing any file over ~150 lines, for multi-edit series, for exploring code structure (symbols/tree/goto), finding all occurrences with context, encoding work (cp1251/UTF-16), and exact arithmetic. Fires on file editing, large file refactoring, code navigation, calculations. DEFAULT editor for code files — built-in Edit only for trivial one-liners.
 ---
 
-# SmartEdit — line-based editor for big files
+# SmartEdit — the default line-based editor
 
 Built-in Edit needs a byte-exact `old_string` — on big files it breaks (drift after context
 summarization). SmartEdit edits by **line numbers** — nothing to mismatch. The file lives in the
-server's RAM, not in your context.
+server's RAM, not in your context. Every edit answers back: diff, **anchored diagnostics**,
+and auto-recovery if a peer raced you.
 
-## When SmartEdit
+## When SmartEdit (default for code)
 
-- File **> ~150 lines** — almost always (open amortizes across the edit series)
+- Any file **> ~150 lines** — open amortizes across the edit series
 - **Edit series** in one file: 2+ edits → `edit_batch` (atomic, no shift math)
 - **Mass rename**: `replace_all` (literal, not regex, one rev)
-- **Structure**: `symbols` / `goto(name)` / `tree` (C#/py/js/java/cpp/xml/html)
+- **Structure**: `open` returns `code_outline` (top-50 symbols, ≤5k-line code files) — no extra call;
+  deeper: `symbols` / `goto(name)` / `tree`
 - **All occurrences**: `find(regex, context=2)` — snippets + breadcrumb `Ns.Class.Method`
 - **Encodings**: cp1251/UTF-16 (`open` with `encoding`), `file_info`, `convert`; `save` defaults to keep
-- File **dropped from context** after summarization — don't re-read: `open → symbols/find → edit`
+- File **dropped from context** after summarization — don't re-read: `open → code_outline/find → edit`
 - Giants up to ~2 GB UTF-8 (mmap): `show`/`find` read only what is asked
 - **Exact math**: `calc` (hex/bin, ^, !, functions). Never mental arithmetic.
 - **Undo a bad edit**: `undo(n, expected_rev)` (undo twice = redo)
@@ -25,12 +27,12 @@ server's RAM, not in your context.
 
 ## When built-in Edit
 
-- File ≤ 150 lines, one-off 1–2 spot edits, file already in context
+- File ≤ 150 lines, one-off single-line tweak, file already in context
 - Creating a new file (Write)
 
 ## Workflow
 
-1. `open(path)` → sessionId, rev=0, outline/preview (repeat open = attach to the shared document)
+1. `open(path)` → sessionId, rev, code_outline, peers (repeat open = attach to the shared document)
 2. `goto(name)` / `find(regex, context=2)` → locate lines
 3. One edit: `replace_lines(start, end, new_text, expected_rev, expect_old?)`;
    2+ edits: `edit_batch(edits[])` — all ranges/anchors validated BEFORE applying, bottom-up, one rev bump;
@@ -42,7 +44,19 @@ server's RAM, not in your context.
 - Lines are 1-based inclusive; `new_text=''` deletes the range; a lone trailing `\n` is ignored
 - Pass `expected_rev` from the previous response; `save` does not bump it
 - `expect_old` — anchor against your own line math (mismatch → `anchor_mismatch` names the line)
-- Errors are JSON: `{"kind":"stale_rev|anchor_mismatch|invalid_range|batch_overlap|too_large|…","current_rev":N}` — branch on `kind`
-- Every mutation returns `diff` + `brackets` (unbalanced braces/parens — read it!)
-- Multi-agent: stale errors name the offender; `save` → `peers_dirty` while others are mid-flight; `sync` before big edits in shared files
+- **`diagnostics: [{line, code, message}]`** in every mutation response (v0.8): honest bracket balance
+  across C#/Python/JS/Java/C++ literals (raw `"""`, f-strings, template `${}`, `R"()"`);
+  `unterminated_literal` anchors at the OPENING line — fix before saving, no extra call needed
+- **Stale rev auto-recovers by default** (v0.8): provably-safe retry lands at shifted coordinates and
+  returns `recovered: true` + `intervening: [...]`; a changed range → `stale_conflict` with the current
+  text of the range + `retry_hint` (show it, then re-apply). Pass `retry_on_stale:false` for the plain error
+- Errors are JSON: `{"kind":"stale_rev|stale_conflict|anchor_mismatch|invalid_range|batch_overlap|too_large|…","current_rev":N}` — branch on `kind`
+- Empty file: `replace_lines(1, 0, text)` inserts the first lines (same `end=start-1` convention as batch)
+- Multi-agent: stale errors name the offender; `save` → `peers_dirty` while others are mid-flight; idle attachments auto-detach after 30 min
 - Close sessions when done (mmap holds the file); `close` right after `save`
+
+## Reliability notes (from dogfooding)
+
+- After `save` of a critical edit, a quick `grep` on disk is cheap insurance against stale-artifact surprises
+- A SmartEdit session appearing inconsistent (`show` returns old text) → `close` it and re-`open` fresh;
+  report the incident to the shared journal via the `log` tool
