@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.7.2 (2026-11-11)
+
+- **save-torture guard**: two real-world incidents today showed `save` publishing the PREVIOUS rev's content (duplicate lines on disk while the in-memory document was correct). A deterministic (seeded) torture test now runs a shuffled stream of replace/batch/insert/delete/undo mutations with a save + byte-exact disk↔document comparison after EVERY step — 23 mutations / 29 saves, all byte-identical. The current engine is clean; the artifacts traced back to a legacy server binary still running from before the v0.7 rework. The guard locks the property forever
+
 ## v0.7.1 (2026-11-11)
 
 - **Bracket check anchors**: `check` reports now anchor to the OPENING bracket's line (stack-of-pairs with positions, the canonical linter approach): a mismatched closer says `line 5: '}' here, but '(' from line 4 is still open — missing ')'?'`, an unclosed opener says `line 1: '{' opened here is never closed (missing '}')` — at its own opening line, outermost first, with the missing closer named. A mismatch now resyncs the stack (one error no longer cascades through the rest of the file); a stray closer says `closes nothing`. Selftested (mismatch anchor, own-line report, source order, stray closer)

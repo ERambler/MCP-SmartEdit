@@ -45,6 +45,7 @@ public static class SelfTest {
         V054Update.Run(dir);
         V062Outline.Run(dir);
         V070Stale.Run(dir);
+        V072SaveTorture.Run(dir);
         V03Features.BatchAndAnchors(dir);
         await V03Features.StructuredErrorsAsync(dir);
         V03Features.ReplaceAllTests(dir);
@@ -957,6 +958,59 @@ static class V070Stale {
         var r = JsonSerializer.Deserialize<OpenResult>(json, RpcJson.Default.OpenResult)!;
         doc = Sessions.Get(r.SessionId).Doc;
         return r;
+    }
+}
+
+/// <summary>
+/// v0.7.2: torture-страж «save публикует ТЕКУЩИЙ ревиз» — два реальных инцидента, когда save писал
+/// контент предыдущего ревиз. Детерминированный (seed) перемешанный поток мутаций
+/// (replace/batch/insert/delete/undo), после КАЖДОЙ — save и побайтовая сверка диска с документом.
+/// </summary>
+static class V072SaveTorture {
+    public static void Run(string dir) {
+        string p = Path.Combine(dir, "save-torture.txt");
+        File.WriteAllText(p, string.Join("\n", Enumerable.Range(1, 40).Select(i => $"line{i}")) + "\n", new UTF8Encoding(false));
+        var s = EditSession.Open(p, null);
+        var rng = new Random(20261111); // фиксированный seed: воспроизводимость
+        int saves = 0, muts = 0;
+        string Disk() => File.ReadAllText(p);
+        string Doc() => string.Join("\n", Enumerable.Range(1, s.TotalLines).Select(i => s.GetLineText(i))) + "\n";
+        void Verify(string tag) {
+            s.Save(false, "keep", false, "torture");
+            saves++;
+            SelfTest.Check(Disk() == Doc(), $"save-torture: {tag} — на диске ровно текущий ревиз (r{s.Rev})");
+        }
+
+        for (int step = 0; step < 30; step++) {
+            int op = rng.Next(5);
+            if (op == 0 && s.TotalLines > 4) {
+                int a = 1 + rng.Next(s.TotalLines - 2), b = a + rng.Next(2);
+                s.ReplaceLines(a, b, $"step{step}", s.Rev, false, null, "torture"); muts++;
+                Verify($"replace {a}..{b}");
+            }
+            else if (op == 1) {
+                int at = rng.Next(s.TotalLines);
+                s.InsertAfter(at, $"ins{step}\nins{step}b", s.Rev, false, "torture"); muts++;
+                Verify($"insert_after {at}");
+            }
+            else if (op == 2 && s.TotalLines > 8) {
+                int a = 1 + rng.Next(s.TotalLines - 6);
+                s.EditBatch([
+                    new(a, a + 1, $"b1_{step}", null),
+                    new(a + 3, a + 3 + rng.Next(2), "", null),
+                ], s.Rev, false, "torture"); muts++;
+                Verify("edit_batch + delete");
+            }
+            else if (op == 3 && muts > 0) {
+                try { s.Undo(1, s.Rev, false, "torture"); Verify("undo"); } catch (ToolException) { /* nothing_to_undo/undo_conflict — валидно */ }
+            }
+            else {
+                s.ReplaceLines(1, 1, $"head{step}", s.Rev, false, "line1" == s.GetLineText(1) ? "line1" : null, "torture"); muts++;
+                Verify("replace+anchor");
+            }
+        }
+        SelfTest.CheckPublic(saves > 20 && muts > 15, $"save-torture: плотность достигнута ({muts} мутаций / {saves} сохранений)");
+        s.Dispose();
     }
 }
 
