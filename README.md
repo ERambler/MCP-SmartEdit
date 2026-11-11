@@ -175,17 +175,10 @@ Tracked in [GitHub Issues](https://github.com/ERambler/MCP-SmartEdit/issues) —
 - [#1 stale-rev auto-recovery](https://github.com/ERambler/MCP-SmartEdit/issues/1) — retry-once with anchor revalidation (**P0** per telemetry: 8.6 % of replaces hit stale_rev)
 - [#2 code outline in `open` response](https://github.com/ERambler/MCP-SmartEdit/issues/2) — adoption fix for structure vision (3 uses / 86 opens)
 - [#3 multi-file transactions](https://github.com/ERambler/MCP-SmartEdit/issues/3) — `edit_transaction` across sessions, commit-all-or-nothing
-- [#4 CI: build + selftest gate + release artifact](https://github.com/ERambler/MCP-SmartEdit/issues/4)
-- [#5 self-contained & Native AOT builds](https://github.com/ERambler/MCP-SmartEdit/issues/5) — drop the .NET 10 runtime requirement
-- [#6 attention tracking](https://github.com/ERambler/MCP-SmartEdit/issues/6) — warn on edits to ranges the agent never read ("you're editing blind at line 812")
-- [#7 parameterized edit recipes](https://github.com/ERambler/MCP-SmartEdit/issues/7) — replayable validated refactors across N files (LLM-consultant idea)
-- [#1 stale-rev auto-recovery](https://github.com/ERambler/MCP-SmartEdit/issues/1) — retry-once with anchor revalidation (**P0** per telemetry: 8.6 % of replaces hit stale_rev)
-- [#2 code outline in `open` response](https://github.com/ERambler/MCP-SmartEdit/issues/2) — adoption fix for structure vision (3 uses / 86 opens)
-- [#3 multi-file transactions](https://github.com/ERambler/MCP-SmartEdit/issues/3) — `edit_transaction` across sessions, commit-all-or-nothing
-- [#4 CI: build + selftest gate + release artifact](https://github.com/ERambler/MCP-SmartEdit/issues/4)
-- [#5 self-contained & Native AOT builds](https://github.com/ERambler/MCP-SmartEdit/issues/5) — drop the .NET 10 runtime requirement
-- [#6 attention tracking](https://github.com/ERambler/MCP-SmartEdit/issues/6) — warn on edits to ranges the agent never read ("you're editing blind at line 812")
-- [#7 parameterized edit recipes](https://github.com/ERambler/MCP-SmartEdit/issues/7) — replayable validated refactors across N files (LLM-consultant idea)
+- [#6 CI: build + selftest gate + release artifact](https://github.com/ERambler/MCP-SmartEdit/issues/6)
+- [#7 self-contained & Native AOT builds](https://github.com/ERambler/MCP-SmartEdit/issues/7) — drop the .NET 10 runtime requirement
+- [#5 attention tracking](https://github.com/ERambler/MCP-SmartEdit/issues/5) — warn on edits to ranges the agent never read ("you're editing blind at line 812")
+- [#8 parameterized edit recipes](https://github.com/ERambler/MCP-SmartEdit/issues/8) — replayable validated refactors across N files (LLM-consultant idea)
 
 ## License
 
