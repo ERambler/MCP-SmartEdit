@@ -47,16 +47,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
-  # AOT-эксперимент (#7): линкер MSVC есть на runner'е — пробуем собрать и прогнать selftest.
-  # Не блокирует релиз; зелёный результат = прикрепим ассетом в следующей итерации.
-  aot-experiment:
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: windows-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 10.x
-      - run: dotnet publish -c Release -r win-x64 -p:PublishAot=true -p:SelfContained=true -o win-x64/publish-aot src/SmartEdit.Mcp/SmartEdit.Mcp.csproj
-      - run: win-x64/publish-aot/SmartEdit.Mcp.exe selftest
+  # AOT-эксперимент ЗАКРЫТ (консилиум 2026-11-11): единственный кейс AOT (нет рантайма + узкий канал)
+  # покрывается self-contained ассетом; startup нерелевантен (один запуск за сессию клиента);
+  # AOT несовместим с Roslyn-планом и вносил постоянный CI-налог. Полный разбор — issue #7.
