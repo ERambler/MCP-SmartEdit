@@ -55,8 +55,14 @@ and auto-recovery if a peer raced you.
 - Multi-agent: stale errors name the offender; `save` → `peers_dirty` while others are mid-flight; idle attachments auto-detach after 30 min
 - Close sessions when done (mmap holds the file); `close` right after `save`
 
-## Reliability notes (from dogfooding)
+## If something looks wrong (abnormal — not a ritual)
 
-- After `save` of a critical edit, a quick `grep` on disk is cheap insurance against stale-artifact surprises
-- A SmartEdit session appearing inconsistent (`show` returns old text) → `close` it and re-`open` fresh;
-  report the incident to the shared journal via the `log` tool
+The engine's guarantees are test-locked: every save publishes exactly the current rev (byte-verified
+by the save-torture check in selftest), diagnostics can't false-alarm on string contents. So treat
+these as REGRESSIONS, not as weather:
+
+- `save` result differs from what the session shows on disk → `log(grep="update:")` to capture evidence, re-`open`, report
+- `show` returning text that contradicts the last diff → `close` the session, `open` fresh, report with journal lines
+
+Do not build habits around them — grep-after-save and reopen-on-suspicion are incident protocol,
+not everyday steps.
