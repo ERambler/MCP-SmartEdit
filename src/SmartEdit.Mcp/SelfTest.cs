@@ -51,6 +51,7 @@ public static class SelfTest {
         V081Help.Run(dir);
         V082Polish.Run(dir);
         V082Lock.Run(dir);
+        V090PathTxn.Run(dir);
         V03Features.BatchAndAnchors(dir);
         await V03Features.StructuredErrorsAsync(dir);
         V03Features.ReplaceAllTests(dir);
@@ -287,7 +288,7 @@ public static class SelfTest {
         SelfTest.Check(err is null && res!.Value.GetProperty("serverInfo").GetProperty("name").GetString() == "smartedit", "proto: initialize");
 
         (res, err) = await h.HandleAsync(new RpcRequest { Method = "tools/list", Id = J("2") });
-        SelfTest.Check(err is null && res!.Value.GetProperty("tools").GetArrayLength() == 21, "proto: 21 инструментов (v0.8.1 + help)");
+        SelfTest.Check(err is null && res!.Value.GetProperty("tools").GetArrayLength() == 22, "proto: 22 инструмента (v0.9 + edit_transaction)");
 
         string p = Path.Combine(dir, "proto.txt");
         File.WriteAllText(p, "1\n2\n3\n");
@@ -1081,6 +1082,23 @@ static class V080Literals {
             "lexer: C# raw $$-строки с JSON-скобками и $-интерполяцией — баланс чист");
         scs.Dispose();
 
+        // v0.9 regression: // комментарий НЕ съедает следующую строку (диагностика врала → ложные strays)
+        string cm = Path.Combine(dir, "comment-eats-next.cs");
+        File.WriteAllText(cm,
+            """"
+            class C {
+                void M() {
+                    att.X = outcome.Rev; // v0.9: доставил
+                    return Json(new R {
+                    }, R);
+                }
+            }
+            """", new UTF8Encoding(false));
+        var scm = EditSession.Open(cm, null);
+        SelfTest.CheckPublic(scm.CheckBrackets(0, 0).Count == 0,
+            "lexer: // комментарий не съедает следующую строку (v0.9 fix)");
+        scm.Dispose();
+
         // Незакрытый raw: диагностика якорем на строку ОТКРЫТИЯ (v0.8 киллерфича)
         string unclosed = Path.Combine(dir, "unclosed.cs");
         File.WriteAllText(unclosed,
@@ -1201,6 +1219,79 @@ static class V082Lock {
     }
 }
 
+/// <summary>v0.9: path-everywhere (путь вместо session_id в любом инструменте — смерть ритуала open) + edit_transaction (#3).</summary>
+static class V090PathTxn {
+    public static void Run(string dir) {
+        var tools = new ToolRegistry();
+        tools.RegisterEditTools();
+        string nl = ((char)10).ToString();
+        string J(string path) => path.Replace("\\", "\\\\");
+
+        // (a) path-mode: show и replace_lines БЕЗ open — путь прикрепляется к общему документу
+        string p1 = Path.Combine(dir, "p-mode.txt");
+        File.WriteAllText(p1, "alpha" + nl + "beta" + nl);
+        string shRaw = tools.CallAsync("show", JsonDocument.Parse($$"""{"path":"{{J(p1)}}","start":1,"end":2}""").RootElement.Clone(), default).GetAwaiter().GetResult();
+        var sh = JsonSerializer.Deserialize<ShowResult>(shRaw, RpcJson.Default.ShowResult)!;
+        SelfTest.CheckPublic(sh.Text.Contains("alpha") && sh.Text.Contains("beta") && sh.Rev == 0, "path-mode: show без open");
+
+        string mutRaw = tools.CallAsync("replace_lines", JsonDocument.Parse($$"""{"path":"{{J(p1)}}","start":1,"end":1,"new_text":"ALPHA"}""").RootElement.Clone(), default).GetAwaiter().GetResult();
+        var mut = JsonSerializer.Deserialize<MutationResult>(mutRaw, RpcJson.Default.MutationResult)!;
+        SelfTest.CheckPublic(mut.Rev == 1 && mut.Diff.Contains("ALPHA"), "path-mode: replace_lines по пути (rev 1)");
+
+        string mutRaw2 = tools.CallAsync("replace_lines", JsonDocument.Parse($$"""{"path":"{{J(p1)}}","start":2,"end":2,"new_text":"BETA"}""").RootElement.Clone(), default).GetAwaiter().GetResult();
+        var mut2 = JsonSerializer.Deserialize<MutationResult>(mutRaw2, RpcJson.Default.MutationResult)!;
+        SelfTest.CheckPublic(mut2.Rev == 2, "path-mode: повторный путь = тот же документ, rev-цепочка без явного expected_rev");
+
+        ToolException? amb = null;
+        try { _ = tools.CallAsync("show", JsonDocument.Parse($$"""{"session_id":"whatever","path":"{{J(p1)}}","start":1,"end":1}""").RootElement.Clone(), default).GetAwaiter().GetResult(); }
+        catch (ToolException t) { amb = t; }
+        SelfTest.CheckPublic(amb is not null && amb.Kind == "ambiguous_target", "path-mode: session_id + path → ambiguous_target");
+
+        // (b) edit_transaction all-or-nothing: битый якорь в файле 3 → отменено ВСЁ, диск не тронут
+        string t1 = Path.Combine(dir, "tx1.txt"); File.WriteAllText(t1, "one" + nl);
+        string t2 = Path.Combine(dir, "tx2.txt"); File.WriteAllText(t2, "two" + nl);
+        string t3 = Path.Combine(dir, "tx3.txt"); File.WriteAllText(t3, "three" + nl);
+        ToolException? aborted = null;
+        try {
+            _ = tools.CallAsync("edit_transaction", JsonDocument.Parse($$"""{"steps":[{"path":"{{J(t1)}}","edits":[{"start":1,"end":1,"new_text":"ONE"}]},{"path":"{{J(t2)}}","edits":[{"start":1,"end":1,"new_text":"TWO"}]},{"path":"{{J(t3)}}","edits":[{"start":1,"end":1,"new_text":"THREE","expect_old":"WRONG"}]}]}""").RootElement.Clone(), default).GetAwaiter().GetResult();
+        }
+        catch (ToolException t) { aborted = t; }
+        SelfTest.CheckPublic(aborted is not null && aborted.Kind == "transaction_aborted" && aborted.Message.Contains("tx3.txt"),
+            "txn: битый якорь в файле 3 → transaction_aborted с именем файла");
+        SelfTest.CheckPublic(File.ReadAllText(t1) == "one" + nl && File.ReadAllText(t2) == "two" + nl && File.ReadAllText(t3) == "three" + nl,
+            "txn: all-or-nothing — ни один файл не тронут");
+
+        // (c) happy path: 3 файла + save:true → per-file статус и диск
+        string txRaw = tools.CallAsync("edit_transaction", JsonDocument.Parse($$"""{"steps":[{"path":"{{J(t1)}}","edits":[{"start":1,"end":1,"new_text":"ONE"}]},{"path":"{{J(t2)}}","edits":[{"start":1,"end":1,"new_text":"TWO"}]},{"path":"{{J(t3)}}","edits":[{"start":1,"end":1,"new_text":"THREE","expect_old":"three"}]}],"save":true}""").RootElement.Clone(), default).GetAwaiter().GetResult();
+        var tx = JsonSerializer.Deserialize<TransactionResult>(txRaw, RpcJson.Default.TransactionResult)!;
+        SelfTest.CheckPublic(tx.Applied == 3 && tx.Files.Count == 3 && tx.Files.All(f => f.SavedOk == true), "txn: 3 правки в 3 файлах, save ok");
+        SelfTest.CheckPublic(File.ReadAllText(t1).StartsWith("ONE") && File.ReadAllText(t3).StartsWith("THREE"), "txn: диск соответствует применённому");
+
+        // (d) >8 файлов без reason → runaway guard; с reason → применяется (RAM, диск не тронут)
+        var many = new List<string>();
+        for (int i = 1; i <= 9; i++) { string f = Path.Combine(dir, $"tx-many-{i}.txt"); File.WriteAllText(f, "m" + nl); many.Add(f); }
+        var sb = new StringBuilder("{\"steps\":[");
+        for (int i = 0; i < many.Count; i++) {
+            if (i > 0) sb.Append(',');
+            sb.Append("{\"path\":\"").Append(J(many[i])).Append("\",\"edits\":[{\"start\":1,\"end\":1,\"new_text\":\"M\"}]}");
+        }
+        sb.Append("]}");
+        ToolException? guard = null;
+        try { _ = tools.CallAsync("edit_transaction", JsonDocument.Parse(sb.ToString()).RootElement.Clone(), default).GetAwaiter().GetResult(); }
+        catch (ToolException t) { guard = t; }
+        SelfTest.CheckPublic(guard is not null && guard.Kind == ToolException.InvalidArgs && guard.Message.Contains("reason"), "txn: >8 файлов требует reason");
+        sb.Insert(sb.Length - 1, ",\"reason\":\"selftest\"");
+        string txManyRaw = tools.CallAsync("edit_transaction", JsonDocument.Parse(sb.ToString()).RootElement.Clone(), default).GetAwaiter().GetResult();
+        var txMany = JsonSerializer.Deserialize<TransactionResult>(txManyRaw, RpcJson.Default.TransactionResult)!;
+        SelfTest.CheckPublic(txMany.Applied == 9 && txMany.Files.All(f => f.SavedOk is null) && many.All(f => File.ReadAllText(f) == "m" + nl),
+            "txn: с reason — 9 файлов применены в RAM, save не запрашивался (SavedOk null, диск чист)");
+
+        // прибраться — close тоже по пути (path-everywhere): не копим сессии к лимиту 32
+        foreach (var f in new[] { p1, t1, t2, t3 }.Concat(many))
+            _ = tools.CallAsync("close", JsonDocument.Parse($$"""{"path":"{{J(f)}}","discard":true}""").RootElement.Clone(), default).GetAwaiter().GetResult();
+    }
+}
+
 /// <summary>v0.8.1 (#1-3): структурный retry, outline totals/truncated, find span.</summary>
 static class V082Polish {
     public static void Run(string dir) {
@@ -1257,7 +1348,7 @@ static class V081Help {
             "help: семантика диапазонов на странице");
         SelfTest.CheckPublic(page.Contains("stale_conflict") && page.Contains("anchor_mismatch") && page.Contains("peers_dirty"),
             "help: error kinds с действиями");
-        SelfTest.CheckPublic(new[] { "edit_batch", "replace_all", "undo", "goto", "sessions", "calc" }.All(t => page.Contains(t)),
+        SelfTest.CheckPublic(new[] { "edit_batch", "edit_transaction", "replace_all", "undo", "goto", "sessions", "calc", "path-first" }.All(t => page.Contains(t)),
             "help: все ключевые инструменты в карте");
         SelfTest.CheckPublic(page.Length < 6000, $"help: компактен ({page.Length} симв.) — один вызов, не простыня");
     }

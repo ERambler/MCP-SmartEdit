@@ -31,7 +31,8 @@ public static class EditToolsRegistration {
         tools.Register(new LogTool());  // v0.5: экстренная ручка
         tools.Register(new UndoTool());
         tools.Register(new GotoTool()); // v0.5
-        tools.Register(new HelpTool()); // v0.8.1: самодокументируемый API — 21 инструментов
+        tools.Register(new HelpTool());
+        tools.Register(new TransactionTool()); // v0.9 (#3): 22 инструмента
     }
 }
 
@@ -170,15 +171,15 @@ sealed class ShowTool : ITool {
         "Return numbered lines start..end (1-based, inclusive). Show a range right before editing it. max_chars caps the output (default 20000, max 200000).";
     public string InputSchemaJson => """
         {"type":"object","properties":{
-          "session_id":{"type":"string"},
+          "session_id":{"type":"string","description":"from a previous response; optional if path given"},"path":{"type":"string","description":"open-by-path: skip open entirely"},
           "start":{"type":"integer","description":"first line, 1-based"},
           "end":{"type":"integer","description":"last line, inclusive"},
           "max_chars":{"type":"integer","description":"output budget, default 20000"}
-        },"required":["session_id","start","end"]}
+        },"required":["start","end"]}
         """;
 
     public async Task<string> ExecuteAsync(JsonElement args, CancellationToken ct) {
-        var att = Sessions.Get(args.GetString("session_id"));
+        var att = Sessions.Resolve(args.GetNullableString("session_id"), args.GetNullableString("path"));
         var s = att.Doc;
         Sessions.Touch(att);
         int start = args.GetRequiredInt("start");
@@ -200,17 +201,17 @@ sealed class FindTool : ITool {
         "if symbols were requested). context=N adds a numbered snippet around each hit (all occurrences view). Feed line numbers into replace_lines/insert_after.";
     public string InputSchemaJson => """
         {"type":"object","properties":{
-          "session_id":{"type":"string"},
+          "session_id":{"type":"string","description":"from a previous response; optional if path given"},"path":{"type":"string","description":"open-by-path: skip open entirely"},
           "regex":{"type":"string","description":".NET regex"},
           "after_line":{"type":"integer","description":"skip lines up to this one (default 0)"},
           "max_hits":{"type":"integer","description":"default 20, max 200"},
           "context":{"type":"integer","description":"lines around each hit for snippets, default 0, max 10"},
           "ignore_case":{"type":"boolean","description":"default false"}
-        },"required":["session_id","regex"]}
+        },"required":["regex"]}
         """;
 
     public async Task<string> ExecuteAsync(JsonElement args, CancellationToken ct) {
-        var att = Sessions.Get(args.GetString("session_id"));
+        var att = Sessions.Resolve(args.GetNullableString("session_id"), args.GetNullableString("path"));
         var s = att.Doc;
         Sessions.Touch(att);
         var rx = ToolOps.CompileRegex(args.GetString("regex"), args.GetBool("ignore_case"));
@@ -235,30 +236,30 @@ sealed class ReplaceLinesTool : ITool {
     public string Name => "replace_lines";
     public string Description =>
         "Replace lines start..end (1-based, inclusive) with new_text lines. new_text='' deletes the range; a lone trailing newline is ignored. " +
-        "expected_rev must equal the current rev; on mismatch the error carries current_rev. " +
+        "expected_rev (optional: omit = the last rev you observed) must equal the current rev; on mismatch the error carries current_rev. " +
         "retry_on_stale=true (#1): on stale_rev auto-retry ONCE at the fresh rev when it is provably safe — expect_old anchor still matches, or the range was untouched by the intervening edits (line shifts tracked); response gains recovered=true + intervening=[what others did]. Never blind: changed range → structured stale_conflict with the current text of the range. " +
         "expect_old (optional anchor): exact current text of the range — guards against wrong-line math (kind=anchor_mismatch names the line). " +
         "dry_run=true returns the diff without applying. For 2+ edits use edit_batch.";
     public string InputSchemaJson => """
         {"type":"object","properties":{
-          "session_id":{"type":"string"},
+          "session_id":{"type":"string","description":"from a previous response; optional if path given"},"path":{"type":"string","description":"open-by-path: skip open entirely"},
           "start":{"type":"integer"},
           "end":{"type":"integer"},
           "new_text":{"type":"string","description":"replacement lines ('' = delete)"},
           "expect_old":{"type":"string","description":"optional anchor: exact current text of start..end"},
-          "expected_rev":{"type":"integer"},
+          "expected_rev":{"type":"integer","description":"optional: omit = the last rev you observed (server tracks it)"},
           "retry_on_stale":{"type":"boolean","description":"auto-retry once on stale_rev when provably safe (anchor intact or range untouched); default false"},
           "dry_run":{"type":"boolean","description":"default false"}
-        },"required":["session_id","start","end","new_text","expected_rev"]}
+        },"required":["start","end","new_text"]}
         """;
 
     public async Task<string> ExecuteAsync(JsonElement args, CancellationToken ct) {
-        var att = Sessions.Get(args.GetString("session_id"));
+        var att = Sessions.Resolve(args.GetNullableString("session_id"), args.GetNullableString("path"));
         var s = att.Doc;
         int start = args.GetRequiredInt("start");
         int end = args.GetRequiredInt("end");
         string newText = args.GetString("new_text");
-        int expectedRev = args.GetRequiredInt("expected_rev");
+        int expectedRev = args.GetInt("expected_rev", att.LastSeenRev); // v0.9: omit = последний увиденный rev
         bool dryRun = args.GetBool("dry_run");
         string? expectOld = args.GetNullableString("expect_old");
         bool retryOnStale = args.GetBool("retry_on_stale", true); // v0.8: recovery по умолчанию (opt-out: false)
@@ -269,6 +270,7 @@ sealed class ReplaceLinesTool : ITool {
                 return StaleRecovery.RecoverReplace(s, att.Id, start, end, newText, expectedRev, dryRun, expectOld);
             }
         });
+        att.LastSeenRev = outcome.Rev; // v0.9: ответ доставил состояние
         return ToolOps.Json(new MutationResult {
             Rev = outcome.Rev, TotalLines = outcome.TotalLines, Diff = outcome.Diff, DryRun = outcome.DryRun,
             Brackets = outcome.Brackets?.ToArray(),
@@ -342,22 +344,23 @@ sealed class InsertAfterTool : ITool {
         "Insert text after line N (line=0 inserts at top). Same rev contract and dry_run as replace_lines.";
     public string InputSchemaJson => """
         {"type":"object","properties":{
-          "session_id":{"type":"string"},
+          "session_id":{"type":"string","description":"from a previous response; optional if path given"},"path":{"type":"string","description":"open-by-path: skip open entirely"},
           "line":{"type":"integer","description":"0 = at top"},
           "text":{"type":"string"},
-          "expected_rev":{"type":"integer"},
+          "expected_rev":{"type":"integer","description":"optional: omit = the last rev you observed (server tracks it)"},
           "dry_run":{"type":"boolean","description":"default false"}
-        },"required":["session_id","line","text","expected_rev"]}
+        },"required":["line","text"]}
         """;
 
     public async Task<string> ExecuteAsync(JsonElement args, CancellationToken ct) {
-        var att = Sessions.Get(args.GetString("session_id"));
+        var att = Sessions.Resolve(args.GetNullableString("session_id"), args.GetNullableString("path"));
         var s = att.Doc;
         int line = args.GetRequiredInt("line");
         string text = args.GetString("text");
-        int expectedRev = args.GetRequiredInt("expected_rev");
+        int expectedRev = args.GetInt("expected_rev", att.LastSeenRev); // v0.9: omit = последний увиденный rev
         bool dryRun = args.GetBool("dry_run");
         var outcome = await ToolOps.LockedAsync(s, () => s.InsertAfter(line, text, expectedRev, dryRun, att.Id));
+        att.LastSeenRev = outcome.Rev; // v0.9: ответ доставил состояние
         return ToolOps.Json(new MutationResult {
             Rev = outcome.Rev, TotalLines = outcome.TotalLines, Diff = outcome.Diff, DryRun = outcome.DryRun,
             Brackets = outcome.Brackets?.ToArray(),
@@ -372,15 +375,15 @@ sealed class SaveTool : ITool {
         "encoding: 'keep' (default — original encoding/BOM preserved) or 'utf8' (no BOM, converts). Session stays open; rev does NOT change (save does not renumber lines).";
     public string InputSchemaJson => """
         {"type":"object","properties":{
-          "session_id":{"type":"string"},
+          "session_id":{"type":"string","description":"from a previous response; optional if path given"},"path":{"type":"string","description":"open-by-path: skip open entirely"},
           "backup":{"type":"boolean","description":"default true"},
           "encoding":{"type":"string","enum":["keep","utf8"],"description":"default keep (original encoding)"},
           "force":{"type":"boolean","description":"overwrite despite external changes, default false"}
-        },"required":["session_id"]}
+        },"required":[]}
         """;
 
     public async Task<string> ExecuteAsync(JsonElement args, CancellationToken ct) {
-        var att = Sessions.Get(args.GetString("session_id"));
+        var att = Sessions.Resolve(args.GetNullableString("session_id"), args.GetNullableString("path"));
         var s = att.Doc;
         bool backup = args.GetBool("backup", true);
         string encoding = args.GetString("encoding", "keep");
@@ -397,15 +400,17 @@ sealed class CloseTool : ITool {
     public string Description => "Close a session. discard=true drops unsaved edits (otherwise it refuses while dirty).";
     public string InputSchemaJson => """
         {"type":"object","properties":{
-          "session_id":{"type":"string"},
+          "session_id":{"type":"string","description":"from a previous response; optional if path given"},"path":{"type":"string","description":"open-by-path: skip open entirely"},
           "discard":{"type":"boolean","description":"default false"}
-        },"required":["session_id"]}
+        },"required":[]}
         """;
 
     public async Task<string> ExecuteAsync(JsonElement args, CancellationToken ct) {
-        string id = args.GetString("session_id");
+        // v0.9: close по пути тоже (Resolve): гасит path-attachment этого документа
+        var att = Sessions.Resolve(args.GetNullableString("session_id"), args.GetNullableString("path"));
+        string id = att.Id;
         bool discard = args.GetBool("discard");
-        var doc = Sessions.Get(id).Doc;
+        var doc = att.Doc;
         // detach: не последний — просто отключение (документ жив у peers); последний — гашение документа
         var (wasDirty, disposed, shadow) = await ToolOps.LockedAsync(doc, () => Sessions.Detach(id, discard));
         if (disposed) doc.Dispose(); // семафор гасим уже после Release
@@ -442,13 +447,13 @@ sealed class SyncTool : ITool {
         "(default: your last seen). Call before a big edit in a shared file to see who did what. No state change besides your last_seen.";
     public string InputSchemaJson => """
         {"type":"object","properties":{
-          "session_id":{"type":"string"},
+          "session_id":{"type":"string","description":"from a previous response; optional if path given"},"path":{"type":"string","description":"open-by-path: skip open entirely"},
           "since_rev":{"type":"integer","description":"default: your attachment's last seen rev"}
-        },"required":["session_id"]}
+        },"required":[]}
         """;
 
     public async Task<string> ExecuteAsync(JsonElement args, CancellationToken ct) {
-        var att = Sessions.Get(args.GetString("session_id"));
+        var att = Sessions.Resolve(args.GetNullableString("session_id"), args.GetNullableString("path"));
         var s = att.Doc;
         Sessions.Touch(att);
         return await ToolOps.LockedAsync(s, () => {

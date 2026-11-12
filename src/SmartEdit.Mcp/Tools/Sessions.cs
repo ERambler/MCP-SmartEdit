@@ -62,6 +62,27 @@ static class Sessions {
         }
     }
 
+    /// <summary>
+    /// v0.9 (#3): session_id ИЛИ path — инструменты принимают путь напрямую, сервер сам подключается
+    /// к общему документу (переиспользуемый path-attachment "p:…"). Ритуал open умирает: правки по пути
+    /// без предварительного open; ответ эхом возвращает sessionId для продолжения. Оба сразу → ambiguous_target.
+    /// </summary>
+    public static Attachment Resolve(string? sessionId, string? path) {
+        if (sessionId is not null && path is not null)
+            throw new ToolException("ambiguous_target", "pass either session_id or path, not both");
+        if (sessionId is not null) return Get(sessionId);
+        if (string.IsNullOrEmpty(path)) throw new ToolException(ToolException.UnknownSession, "session_id or path is required");
+        string canonical = System.IO.Path.GetFullPath(path);
+        if (ByPath.TryGetValue(canonical, out var doc)) {
+            var reuse = Map.Values.FirstOrDefault(a => a.Doc == doc && a.Id.StartsWith("p:"));
+            if (reuse is not null) { Touch(reuse); reuse.LastSeenRev = doc.Rev; return reuse; }
+            var att = new Attachment { Id = "p:" + Guid.NewGuid().ToString("N")[..8], Doc = doc, Note = "path", LastSeenRev = doc.Rev };
+            Map[att.Id] = att;
+            return att;
+        }
+        return Attach(path, null, "path").Att; // нового документа нет — открыть (не-UTF-8 → IOException с подсказкой encoding)
+    }
+
     /// <summary>Найти подключение по session_id (unknown_session, если не существует).</summary>
     public static Attachment Get(string id) =>
         Map.TryGetValue(id, out var a)

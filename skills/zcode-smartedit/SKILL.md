@@ -19,7 +19,7 @@ and auto-recovery if a peer raced you.
   deeper: `symbols` / `goto(name)` / `tree`
 - **All occurrences**: `find(regex, context=2)` — snippets + breadcrumb `Ns.Class.Method`
 - **Encodings**: cp1251/UTF-16 (`open` with `encoding`), `file_info`, `convert`; `save` defaults to keep
-- File **dropped from context** after summarization — don't re-read: `open → code_outline/find → edit`
+- File **dropped from context** after summarization — don't re-read: `find(path, …)` / `goto(path, …)` → edit
 - Giants up to ~2 GB UTF-8 (mmap): `show`/`find` read only what is asked
 - **Exact math**: `calc` (hex/bin, ^, !, functions). Never mental arithmetic.
 - **Undo a bad edit**: `undo(n, expected_rev)` (undo twice = redo)
@@ -32,17 +32,18 @@ and auto-recovery if a peer raced you.
 
 ## Workflow
 
-1. `open(path)` → sessionId, rev, code_outline, peers (repeat open = attach to the shared document)
-2. `goto(name)` / `find(regex, context=2)` → locate lines
-3. One edit: `replace_lines(start, end, new_text, expected_rev, expect_old?)`;
-   2+ edits: `edit_batch(edits[])` — all ranges/anchors validated BEFORE applying, bottom-up, one rev bump;
-   rename: `replace_all(find, replace)`
-4. `save()` — keeps encoding by default; rev does NOT change on save
+1. `show(path, 1..N)` / `find(path, regex, context=2)` / `goto(path, name)` — path directly, no open (v0.9)
+2. `open(path)` → sessionId, rev, code_outline, peers — only for its extras (outline/encoding/note); repeat open = attach to the shared document
+3. One edit: `replace_lines(path, start, end, new_text, expect_old?)`;
+   2+ edits in one file: `edit_batch(path, edits[])` — all ranges/anchors validated BEFORE applying, bottom-up, one rev bump;
+   rename: `replace_all(path, find, replace)`;
+   2+ FILES: `edit_transaction(steps[])` — all-or-nothing across files
+4. `save(path)` — keeps encoding by default; rev does NOT change on save
 
 ## Semantics (critical)
 
 - Lines are 1-based inclusive; `new_text=''` deletes the range; a lone trailing `\n` is ignored
-- Pass `expected_rev` from the previous response; `save` does not bump it
+- Pass `expected_rev` only to assert no peer raced you; omitted = the last rev you observed; `save` does not bump it
 - `expect_old` — anchor against your own line math (mismatch → `anchor_mismatch` names the line)
 - **`diagnostics: [{line, code, message}]`** in every mutation response (v0.8): honest bracket balance
   across C#/Python/JS/Java/C++ literals (raw `"""`, f-strings, template `${}`, `R"()"`);
@@ -54,7 +55,16 @@ and auto-recovery if a peer raced you.
 - Empty file: `replace_lines(1, 0, text)` inserts the first lines (same `end=start-1` convention as batch)
 - Multi-agent: stale errors name the offender; `save` → `peers_dirty` while others are mid-flight; idle attachments auto-detach after 30 min
 - **Locks (v0.8.2)**: clean sessions NEVER hold files between tool calls — git/scripts/formatters can write freely; a DIRTY session holds its file until save/close (protection). External change while released → next call starts fresh (rev=0); deletion → `disk_conflict`
-- Close sessions when done; `close` right after `save` (clean sessions no longer lock files — v0.8.2 — but closing frees RAM)
+- **Path-first (v0.9)**: every session tool takes `path` directly — `open` is never a prerequisite.
+  Single file: `show(path, 1..N) → find(path, …) → replace_lines(path, …) → save(path) → close(path)`.
+  `open(path)` only when you want its extras: code_outline preview, `note`, explicit `encoding`.
+  Both `session_id` AND `path` in one call → `ambiguous_target`
+- Multi-file refactor (2+ files, one logical change): `edit_transaction(steps=[{path, edits[]}], save?)` —
+  all-or-nothing (one bad anchor anywhere → `transaction_aborted`, NOTHING applied); `save` defaults
+  to false (RAM-staging): inspect diffs, then `save` each path (or pass `save:true` for best-effort per-file)
+- `expected_rev` is OPTIONAL everywhere: omit = the last rev you observed (the server tracks it); pass it
+  explicitly only to assert no peer raced you. Path-mode needs zero rev bookkeeping
+- Close sessions when done; `close` works by path too (v0.8.2: clean sessions never lock files — closing frees RAM)
 
 ## If something looks wrong (abnormal — not a ritual)
 

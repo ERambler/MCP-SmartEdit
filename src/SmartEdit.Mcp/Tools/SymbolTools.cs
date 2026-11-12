@@ -14,13 +14,13 @@ sealed class SymbolsTool : ITool {
         "Line numbers map 1:1 to show/replace_lines. docs_only=true returns only documented symbols. Cache: recomputed on rev change.";
     public string InputSchemaJson => """
         {"type":"object","properties":{
-          "session_id":{"type":"string"},
+          "session_id":{"type":"string","description":"from a previous response; optional if path given"},"path":{"type":"string","description":"open-by-path: skip open entirely"},
           "docs_only":{"type":"boolean","description":"only symbols with XML-doc/docstring (C#/Python), default false"}
-        },"required":["session_id"]}
+        },"required":[]}
         """;
 
     public async Task<string> ExecuteAsync(JsonElement args, CancellationToken ct) {
-        var s = Sessions.Get(args.GetString("session_id")).Doc;
+        var s = Sessions.Resolve(args.GetNullableString("session_id"), args.GetNullableString("path")).Doc;
         bool docsOnly = args.GetBool("docs_only");
         var result = await ToolOps.LockedAsync(s, () => s.Symbols(docsOnly));
         return ToolOps.Json(new SymbolsResult {
@@ -47,14 +47,14 @@ sealed class CheckTool : ITool {
         "Strings/comments/interpolation are excluded by a state machine (code inside {holes} of $\"…\" is kept); <> in C# is NOT checked (generics).";
     public string InputSchemaJson => """
         {"type":"object","properties":{
-          "session_id":{"type":"string"},
+          "session_id":{"type":"string","description":"from a previous response; optional if path given"},"path":{"type":"string","description":"open-by-path: skip open entirely"},
           "start":{"type":"integer"},
           "end":{"type":"integer"}
-        },"required":["session_id"]}
+        },"required":[]}
         """;
 
     public async Task<string> ExecuteAsync(JsonElement args, CancellationToken ct) {
-        var s = Sessions.Get(args.GetString("session_id")).Doc;
+        var s = Sessions.Resolve(args.GetNullableString("session_id"), args.GetNullableString("path")).Doc;
         int start = args.GetInt("start", 0);
         int end = args.GetInt("end", 0);
         var problems = await ToolOps.LockedAsync(s, () => s.CheckBrackets(start, end));

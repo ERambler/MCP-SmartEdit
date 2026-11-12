@@ -196,7 +196,8 @@ sealed class HelpTool : ITool {
 """
 SMARTEDIT — GOLDEN RULES
 - lines are 1-based, INCLUSIVE; end = start-1 => INSERT before start; empty file: replace_lines(1, 0, text)
-- expected_rev comes from YOUR last response (open => rev 0, each edit +1; save does NOT bump rev)
+- path-first (v0.9): EVERY tool accepts path instead of session_id — open is optional, no ritual; both given => ambiguous_target
+- expected_rev is OPTIONAL (omit = the last rev you observed — the server tracks it); pin it to assert no peer raced you
 - expect_old = exact current text of the range — your guard against your own wrong-line math
 - stale rev auto-recovers by default (response: recovered:true + intervening) — usually you do nothing
 - errors are JSON {kind,...} — branch on kind, never parse prose; machine retry: {strategy: reissue_with_rev|reanchor|reread_range, start?, end?}
@@ -206,6 +207,8 @@ navigate : open(path, note?) → sessionId, rev, code_outline(≤5k-line code, +
           find(regex, context:N) → lines+snippets+breadcrumbs+span{start,end} (edit the span, no follow-up show) | symbols / goto / tree | file_info
 edit     : replace_lines(start,end,new_text,expected_rev,expect_old?) | insert_after(line,text,expected_rev)
           edit_batch(edits≤200, atomic, bottom-up = no shift math) | replace_all(literal, refuse-if-too-many)
+          edit_transaction(steps[{path|session_id, edits}], save?) — MULTI-FILE all-or-nothing: every range/anchor
+          validated on all files BEFORE anything applies; one bad step aborts everything (kind=transaction_aborted)
           undo(n, expected_rev) — undo×2 = redo, peer-safe compensating mutations
 lifecycle: save(keeps encoding; force=true publishes peers' edits too) | close(discard?) | sessions | sync
 ops      : check(bracket audit) | log(tail/grep/errors_only — shared journal) | calc(exact math) | convert(encoding)
@@ -224,6 +227,7 @@ unterminated_literal/comment/hole; unterminated_literal anchors the OPENING line
 
 QUICKSTART
 open(path) → find(regex, context:2) → edit_batch(edits, expected_rev, expect_old anchors) → save → close
+single file, zero ceremony (v0.9): show(path, 1..N) → replace_lines(path, ...) → save(path) — open never needed
 (Disk philosophy: NOTHING touches the disk except save — edit freely, undo if wrong, save when happy.
  Locks: a DIRTY session holds its file (protection); a CLEAN session never does — between tool calls the handle is released, so git/scripts/formatters can write freely. External change while released → next call transparently starts fresh (rev=0); file deleted → disk_conflict with retry_hint.)
 """;

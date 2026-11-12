@@ -2,12 +2,12 @@
 
 **Line-based text editor for LLM agents.** A zero-dependency [Model Context Protocol](https://modelcontextprotocol.io) stdio server that lets coding agents edit files by **line numbers** — no byte-exact `old_string` to drift out of sync, no whole files loaded into context. Works with any MCP client: **ZCode, Claude Desktop, Cursor, Windsurf, Cline** and anything else that speaks stdio MCP.
 
-[![Version](https://img.shields.io/badge/version-v0.8.2-blue)](https://github.com/ERambler/MCP-SmartEdit/releases)
+[![Version](https://img.shields.io/badge/version-v0.9.0-blue)](https://github.com/ERambler/MCP-SmartEdit/releases)
 [![CI](https://github.com/ERambler/MCP-SmartEdit/actions/workflows/ci.yml/badge.svg)](https://github.com/ERambler/MCP-SmartEdit/actions/workflows/ci.yml)
 [![.NET](https://img.shields.io/badge/.NET-10-purple)](https://dotnet.microsoft.com/download/dotnet/10.0)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-stdio%20server-orange)](https://modelcontextprotocol.io)
-[![Selftest](https://img.shields.io/badge/selftest-%7E190%20checks%20ALL%20PASS-brightgreen)](#verification)
+[![Selftest](https://img.shields.io/badge/selftest-222%20checks%20ALL%20PASS-brightgreen)](#verification)
 
 ```text
 the #1 failure mode of built-in Edit tools:
@@ -40,6 +40,7 @@ Someone else edited the file while your `rev` aged? `retry_on_stale` (ON by defa
 
 ### 3. All-or-nothing editing
 - **`edit_batch`** — up to 200 edits in one atomic call: every range and anchor validated *before* anything applies; applied bottom-up, no shift math; one rev bump.
+- **`edit_transaction` (v0.9)** — the same guarantee across files: every step validated on every file before anything applies; one bad anchor aborts the whole transaction with `transaction_aborted` naming the file. RAM-atomic by design, `save` explicit.
 - **`expect_old` anchors** — exact-content guard that catches the agent's own wrong-line math (rev only catches *external* drift).
 - **`undo`** — compensating mutations: new rev, peer-safe, `undo` after `undo` redoes.
 
@@ -50,6 +51,7 @@ Someone else edited the file while your `rev` aged? `retry_on_stale` (ON by defa
 One shared document per file path: every editor sees one piece table and one rev. `open(path, note)` lists peers; a conflicting edit names **who** changed **what** and **when**; `save` refuses with `peers_dirty` while others have unsaved work. Idle attachments are garbage-collected after 30 minutes.
 
 ### 6. Zero-ritual operability
+- **Path-first (v0.9)**: every session tool takes `path` directly — `show(path, 1..N) → replace_lines(path, ...) → save(path)`. `open` is optional, `expected_rev` is optional (omit = the last rev you observed). Zero preamble.
 - **`log`** — the shared journal of *all* sessions and processes (every call, every error kind, per-pid, rotated at 5 MB) the agent can grep to retrace its own steps. Test traffic is isolated to a temp dir — the journal reflects real usage only.
 - **Update check** — on startup the server asks GitHub (background, never blocks stdio); a native dialog with release notes; **OK silently installs** the update in place; **Cancel** never nags about that version again.
 - **`calc`** — exact arithmetic (hex/bin/`^`/`!`/functions); LLMs should not do mental math.
@@ -174,7 +176,7 @@ Every mutation response carries: new `rev`, unified `diff`, structured `diagnost
 
 ## Changelog
 
-Full history in [CHANGELOG.md](CHANGELOG.md). Recent: **v0.8.2** unlock-when-clean (clean sessions never lock files; dirty hold until save); **v0.8.1** self-documenting API (`help`) + structured retry/span/truncated; **v0.8** honest brackets + anchored diagnostics + recovery by default; **v0.7** stale-rev auto-recovery, telemetry hygiene, session GC; **v0.6** update check with silent self-install, code outline in `open`, CI gate, self-contained asset.
+Full history in [CHANGELOG.md](CHANGELOG.md). Recent: **v0.9** path-first API (every tool takes `path` — the `open` ritual is dead; `expected_rev` optional), `edit_transaction` (#3) multi-file all-or-nothing, lexer fix for `//` comments; **v0.8.2** unlock-when-clean (clean sessions never lock files; dirty hold until save); **v0.8.1** self-documenting API (`help`) + structured retry/span/truncated; **v0.8** honest brackets + anchored diagnostics + recovery by default; **v0.7** stale-rev auto-recovery, telemetry hygiene, session GC; **v0.6** update check with silent self-install, code outline in `open`, CI gate, self-contained asset.
 
 ## License
 

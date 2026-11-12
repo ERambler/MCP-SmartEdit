@@ -277,7 +277,9 @@ public static class LiteralLexer {
     static bool TryEnterComment(string line, ref int i, LanguageProfile p, LexerState st, StringBuilder sb, int lineNo) {
         bool fromHole = st.Kind == LexerState.HoleCode;
         foreach (var lc in p.LineComments)
-            if (MatchesAt(line, i, lc)) { sb.Append(' ', line.Length - i); i = line.Length; st.Kind = LexerState.LineComment; return true; }
+            // line-комментарий кончается на ТОЙ ЖЕ строке: состояние не переключаем
+            // (v0.9 fix: Kind=LineComment пережидал конец строки и ПОЛНОСТЬЮ съедал СЛЕДУЮЩУЮ строку)
+            if (MatchesAt(line, i, lc)) { sb.Append(' ', line.Length - i); i = line.Length; return true; }
         for (int b = 0; b < p.BlockComments.Length; b++)
             if (MatchesAt(line, i, p.BlockComments[b].Open)) {
                 if (fromHole) st.PushCtx();

@@ -16,23 +16,23 @@ sealed class BatchTool : ITool {
         "end = start-1 inserts before start. One rev bump total; response carries per-edit diffs in your order. dry_run=true → diffs only.";
     public string InputSchemaJson => """
         {"type":"object","properties":{
-          "session_id":{"type":"string"},
+          "session_id":{"type":"string","description":"from a previous response; optional if path given"},"path":{"type":"string","description":"open-by-path: skip open entirely"},
           "edits":{"type":"array","maxItems":200,"items":{"type":"object","properties":{
             "start":{"type":"integer","description":"first line, 1-based"},
             "end":{"type":"integer","description":"last line inclusive; end=start-1 → insert before start"},
             "new_text":{"type":"string"},
             "expect_old":{"type":"string","description":"optional anchor: exact current text of start..end; mismatch rejects the batch"}
           },"required":["start","end","new_text"]}},
-          "expected_rev":{"type":"integer"},
+          "expected_rev":{"type":"integer","description":"optional: omit = the last rev you observed (server tracks it)"},
           "retry_on_stale":{"type":"boolean","description":"auto-retry once on stale_rev when every edit is provably safe; default TRUE since v0.8 (pass false for the plain stale_rev)"},
           "dry_run":{"type":"boolean","description":"default false"}
-        },"required":["session_id","edits","expected_rev"]}
+        },"required":["edits"]}
         """;
 
     public async Task<string> ExecuteAsync(JsonElement args, CancellationToken ct) {
-        var att = Sessions.Get(args.GetString("session_id"));
+        var att = Sessions.Resolve(args.GetNullableString("session_id"), args.GetNullableString("path"));
         var s = att.Doc;
-        int expectedRev = args.GetRequiredInt("expected_rev");
+        int expectedRev = args.GetInt("expected_rev", att.LastSeenRev); // v0.9: omit = последний увиденный rev
         bool dryRun = args.GetBool("dry_run");
         bool retryOnStale = args.GetBool("retry_on_stale", true); // v0.8: recovery по умолчанию (opt-out: false)
         var ops = new List<BatchOp>();
@@ -51,6 +51,7 @@ sealed class BatchTool : ITool {
                 return StaleRecovery.RecoverBatch(s, att.Id, ops, expectedRev, dryRun);
             }
         });
+        att.LastSeenRev = outcome.Rev; // v0.9: ответ доставил состояние
         return ToolOps.Json(new BatchResult {
             Rev = outcome.Rev, TotalLines = outcome.TotalLines, Applied = outcome.Applied, DryRun = outcome.DryRun,
             Diffs = outcome.Diffs.ToArray(), Brackets = outcome.Brackets?.ToArray(),
@@ -69,24 +70,25 @@ sealed class ReplaceAllTool : ITool {
         "Returns occurrences + changed line numbers + per-line diffs. dry_run=true → preview only.";
     public string InputSchemaJson => """
         {"type":"object","properties":{
-          "session_id":{"type":"string"},
+          "session_id":{"type":"string","description":"from a previous response; optional if path given"},"path":{"type":"string","description":"open-by-path: skip open entirely"},
           "find":{"type":"string","description":"literal text to find (not regex)"},
           "replace":{"type":"string"},
           "max_lines":{"type":"integer","description":"cap on changed lines, default 200, max 2000; above → refuse"},
-          "expected_rev":{"type":"integer"},
+          "expected_rev":{"type":"integer","description":"optional: omit = the last rev you observed (server tracks it)"},
           "dry_run":{"type":"boolean","description":"default false"}
-        },"required":["session_id","find","replace","expected_rev"]}
+        },"required":["find","replace"]}
         """;
 
     public async Task<string> ExecuteAsync(JsonElement args, CancellationToken ct) {
-        var att = Sessions.Get(args.GetString("session_id"));
+        var att = Sessions.Resolve(args.GetNullableString("session_id"), args.GetNullableString("path"));
         var s = att.Doc;
         string find = args.GetString("find");
         string replace = args.GetString("replace");
         int maxLines = Math.Clamp(args.GetInt("max_lines", 200), 1, 2000);
-        int expectedRev = args.GetRequiredInt("expected_rev");
+        int expectedRev = args.GetInt("expected_rev", att.LastSeenRev); // v0.9: omit = последний увиденный rev
         bool dryRun = args.GetBool("dry_run");
         var outcome = await ToolOps.LockedAsync(s, () => s.ReplaceAll(find, replace, maxLines, expectedRev, dryRun, att.Id));
+        att.LastSeenRev = outcome.Rev; // v0.9: ответ доставил состояние
         return ToolOps.Json(new ReplaceAllResult {
             Rev = outcome.Rev, TotalLines = outcome.TotalLines, Occurrences = outcome.Occurrences,
             Lines = outcome.Lines.ToArray(), DryRun = outcome.DryRun, Brackets = outcome.Brackets?.ToArray(),

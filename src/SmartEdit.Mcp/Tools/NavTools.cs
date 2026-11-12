@@ -16,20 +16,21 @@ sealed class UndoTool : ITool {
         "kind=nothing_to_undo when history has no invertible edits (edits over 200 lines per side are not invertible). dry_run → diffs only.";
     public string InputSchemaJson => """
         {"type":"object","properties":{
-          "session_id":{"type":"string"},
+          "session_id":{"type":"string","description":"from a previous response; optional if path given"},"path":{"type":"string","description":"open-by-path: skip open entirely"},
           "n":{"type":"integer","description":"how many last edits to undo, default 1, max 20"},
-          "expected_rev":{"type":"integer"},
+          "expected_rev":{"type":"integer","description":"optional: omit = the last rev you observed (server tracks it)"},
           "dry_run":{"type":"boolean","description":"default false"}
-        },"required":["session_id","expected_rev"]}
+        },"required":[]}
         """;
 
     public async Task<string> ExecuteAsync(JsonElement args, CancellationToken ct) {
-        var att = Sessions.Get(args.GetString("session_id"));
+        var att = Sessions.Resolve(args.GetNullableString("session_id"), args.GetNullableString("path"));
         var s = att.Doc;
         int n = Math.Clamp(args.GetInt("n", 1), 1, 20);
-        int expectedRev = args.GetRequiredInt("expected_rev");
+        int expectedRev = args.GetInt("expected_rev", att.LastSeenRev); // v0.9: omit = последний увиденный rev
         bool dryRun = args.GetBool("dry_run");
         var outcome = await ToolOps.LockedAsync(s, () => s.Undo(n, expectedRev, dryRun, att.Id));
+        att.LastSeenRev = outcome.Rev; // v0.9: ответ доставил состояние
         return ToolOps.Json(new BatchResult {
             Rev = outcome.Rev, TotalLines = outcome.TotalLines, Applied = outcome.Applied, DryRun = outcome.DryRun,
             Diffs = outcome.Diffs.ToArray(), Brackets = outcome.Brackets?.ToArray(),
@@ -46,14 +47,14 @@ sealed class GotoTool : ITool {
         "Returns up to 50 matches sorted by line.";
     public string InputSchemaJson => """
         {"type":"object","properties":{
-          "session_id":{"type":"string"},
+          "session_id":{"type":"string","description":"from a previous response; optional if path given"},"path":{"type":"string","description":"open-by-path: skip open entirely"},
           "name":{"type":"string","description":"symbol name substring"},
           "docs_only":{"type":"boolean","description":"default false"}
-        },"required":["session_id","name"]}
+        },"required":["name"]}
         """;
 
     public async Task<string> ExecuteAsync(JsonElement args, CancellationToken ct) {
-        var att = Sessions.Get(args.GetString("session_id"));
+        var att = Sessions.Resolve(args.GetNullableString("session_id"), args.GetNullableString("path"));
         var s = att.Doc;
         Sessions.Touch(att);
         string name = args.GetString("name");

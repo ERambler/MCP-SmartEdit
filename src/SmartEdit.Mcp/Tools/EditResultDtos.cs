@@ -84,6 +84,26 @@ public sealed class MutationResult {
     public DiagDto[]? Diagnostics { get; set; }      // v0.8: структурные якоря (line/code/message), null = чисто
 }
 
+/// <summary>Per-file итог edit_transaction (#3).</summary>
+public sealed class TxFileDto {
+    public string Path { get; set; } = "";
+    public string SessionId { get; set; } = "";
+    public int Rev { get; set; }
+    public int TotalLines { get; set; }
+    public int Applied { get; set; }
+    public List<string> Diffs { get; set; } = [];
+    public DiagDto[]? Diagnostics { get; set; }
+    public bool? SavedOk { get; set; }     // save:true → статус файла (null = save не запрашивался)
+    public string? SaveError { get; set; }
+}
+
+public sealed class TransactionResult {
+    public bool DryRun { get; set; }
+    public bool SaveRequested { get; set; }
+    public int Applied { get; set; }
+    public List<TxFileDto> Files { get; set; } = [];
+}
+
 /// <summary>Структурная диагностика в ответе правки: якорная строка + машинный код + текст.</summary>
 public sealed class DiagDto {
     public int Line { get; set; }
