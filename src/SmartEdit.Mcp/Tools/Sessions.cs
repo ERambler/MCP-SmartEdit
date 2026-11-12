@@ -80,7 +80,18 @@ static class Sessions {
             Map[att.Id] = att;
             return att;
         }
-        return Attach(path, null, "path").Att; // нового документа нет — открыть (не-UTF-8 → IOException с подсказкой encoding)
+        // нового документа нет — открыть СРАЗУ с p:-идентификатором: иначе следующий path-вызов
+        // не найдёт p: для переиспользования, создаст ВТОРОЕ вложение и увидит peers_dirty на свои же правки
+        lock (Map) {
+            PruneStale();
+            if (Map.Count >= MaxSessions)
+                throw new ToolException(ToolException.InvalidArgs, $"{MaxSessions} sessions already open — close one");
+            var s = EditSession.Open(path, null);
+            ByPath[s.Path] = s;
+            var att = new Attachment { Id = "p:" + Guid.NewGuid().ToString("N")[..8], Doc = s, Note = "path", LastSeenRev = 0 };
+            Map[att.Id] = att;
+            return att;
+        }
     }
 
     /// <summary>Найти подключение по session_id (unknown_session, если не существует).</summary>

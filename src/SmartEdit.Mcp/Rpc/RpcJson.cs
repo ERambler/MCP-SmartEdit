@@ -57,6 +57,7 @@ public sealed class ToolErrorPayload {
     public string? CurrentText { get; set; } // текущий текст спорного диапазона (stale_conflict)
     public string? SessionId { get; set; }  // v0.8.1 (#1): эхо сессии — единый конверт, агент не ищет контекст
     public RetryDto? Retry { get; set; }    // v0.8.1 (#1): машинная стратегия вместо парсинга прозы
+    public string? ServerVersion { get; set; } // v0.9.3 (R1): каждый ответ с isError несёт версию — легаси-бинарник в поле виден сразу
 }
 
 /// <summary>Машинная стратегия восстановления: strategy + диапазон для reread_range/reanchor.</summary>

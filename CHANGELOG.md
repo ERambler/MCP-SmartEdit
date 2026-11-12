@@ -1,6 +1,14 @@
 # Changelog
 
 
+## v0.9.3 (2026-11-13)
+
+- **`unsaved` nag in every response** (consilium round 2 — Claude's #1 pain, Gemini concurred): the agent edits, forgets `save`, runs tests via bash → tests see the OLD disk code → debug spiral. Now every edit/show response on a dirty document carries `unsaved: true` (transactions report `unsavedFiles: N`) — the nag rides along until you save
+- **`replace_content` scope bounds** (Gemini): optional `start_line`/`end_line` narrow the uniqueness scope — the boilerplate antidote (don't extend the snippet, bound it); `ambiguous_match` now suggests the bounds
+- **`server_version` in every error payload** (R1): a legacy binary in the field is visible in the error itself — the v0.7.2 stale-save class becomes operationally diagnosable
+- **Path-mode peers_dirty bug (found by our own new test)**: a fresh path-document got an `s:`-attachment instead of `p:`, so the SECOND path call created a duplicate attachment and `save` saw its own edits as peers. New documents now open with the reusable `p:` id from the start
+- Selftests: +6 (nag chain, scope bounds, unsavedFiles, server_version in payload) — 237 total, ALL PASS
+
 ## v0.9.2 (2026-11-13)
 
 - **Cross-process coordination (#16, consilium Gemini+R1)**: two SmartEdit instances on the same file used to fight silently — the second's save hit an opaque EBUSY (or worse, clobbered). Now every document holds a named mutex on its canonical path for its lifetime; the second process gets an explicit `cross_process_lock` error at first touch, pointing to the shared journal for pids. Crashed owner → mutex auto-recovered (AbandonedMutexException handled)

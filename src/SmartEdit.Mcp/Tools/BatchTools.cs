@@ -57,6 +57,7 @@ sealed class BatchTool : ITool {
             Diffs = outcome.Diffs.ToArray(), Brackets = outcome.Brackets?.ToArray(),
             Recovered = outcome.Recovered, Intervening = outcome.Intervening?.ToArray(),
             Diagnostics = outcome.Diags?.Select(d => new DiagDto { Line = d.Line, Code = d.Code, Message = d.Message }).ToArray(),
+            Unsaved = s.Dirty, // v0.9.3: применено в RAM, НЕ сохранено — save(path)
         }, RpcJson.Default.BatchResult);
     }
 }
@@ -92,6 +93,7 @@ sealed class ReplaceAllTool : ITool {
         return ToolOps.Json(new ReplaceAllResult {
             Rev = outcome.Rev, TotalLines = outcome.TotalLines, Occurrences = outcome.Occurrences,
             Lines = outcome.Lines.ToArray(), DryRun = outcome.DryRun, Brackets = outcome.Brackets?.ToArray(),
+            Unsaved = s.Dirty, // v0.9.3
         }, RpcJson.Default.ReplaceAllResult);
     }
 }

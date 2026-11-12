@@ -7,7 +7,7 @@ namespace SmartEdit.Mcp.Rpc;
 
 /// <summary>Диспетчер MCP-методов: initialize, ping, tools/list, tools/call.</summary>
 public sealed class McpProtocolHandler(ToolRegistry tools) {
-    public const string ServerVersion = "0.9.2";
+    public const string ServerVersion = "0.9.3";
     public const string ProtocolVersion = "2025-06-18";
 
     /// <summary>
@@ -82,13 +82,14 @@ public sealed class McpProtocolHandler(ToolRegistry tools) {
                     RetryHint = tex.RetryHint, CurrentText = tex.CurrentText,
                     SessionId = args?.TryGetProperty("session_id", out var sid) == true && sid.ValueKind == JsonValueKind.String ? sid.GetString() : null,
                     Retry = tex.RetryStrategy is null ? null : new RetryDto { Strategy = tex.RetryStrategy, Start = tex.RetryStart, End = tex.RetryEnd },
+                    ServerVersion = ServerVersion, // v0.9.3: версия в каждой ошибке
                 },
                 RpcJson.Default.ToolErrorPayload), isError: true), RpcJson.Default.CallToolResult), null);
         }
         catch (Exception ex) {
             Log.Error($"tool {name}{ArgsBrief(args)} → ошибка: {ex.Message}");
             return (Elem(ToolResult(JsonSerializer.Serialize(
-                new ToolErrorPayload { Kind = "error", Message = ex.Message },
+                new ToolErrorPayload { Kind = "error", Message = ex.Message, ServerVersion = ServerVersion },
                 RpcJson.Default.ToolErrorPayload), isError: true), RpcJson.Default.CallToolResult), null);
         }
     }

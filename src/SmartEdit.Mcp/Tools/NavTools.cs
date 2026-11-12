@@ -34,6 +34,7 @@ sealed class UndoTool : ITool {
         return ToolOps.Json(new BatchResult {
             Rev = outcome.Rev, TotalLines = outcome.TotalLines, Applied = outcome.Applied, DryRun = outcome.DryRun,
             Diffs = outcome.Diffs.ToArray(), Brackets = outcome.Brackets?.ToArray(),
+            Unsaved = s.Dirty, // v0.9.3
         }, RpcJson.Default.BatchResult);
     }
 }

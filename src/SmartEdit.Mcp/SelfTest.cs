@@ -54,6 +54,7 @@ public static class SelfTest {
         V090PathTxn.Run(dir);
         V091Content.Run(dir);
         V092CrossProcess.Run(dir);
+        V093Nag.Run(dir);
         V03Features.BatchAndAnchors(dir);
         await V03Features.StructuredErrorsAsync(dir);
         V03Features.ReplaceAllTests(dir);
@@ -673,6 +674,8 @@ static class V03Features {
         var payload = JsonSerializer.Deserialize<ToolErrorPayload>(
             res!.Value.GetProperty("content")[0].GetProperty("text").GetString()!, RpcJson.Default.ToolErrorPayload)!;
         SelfTest.Check(payload.Kind == "stale_rev" && payload.CurrentRev == 0, $"errors: JSON kind/current_rev ({payload.Kind}/{payload.CurrentRev})");
+        SelfTest.Check(payload.ServerVersion == Rpc.McpProtocolHandler.ServerVersion,
+            $"errors: server_version в payload ({payload.ServerVersion ?? "null"}) — легаси-бинарник виден сразу (v0.9.3)");
     }
 
     public static void TreeRecent() {
@@ -1421,7 +1424,60 @@ static class V092CrossProcess {
         return null;
     }
 }
-/// <summary>v0.8.1 (#1-3): структурный retry, outline totals/truncated, find span.</summary>
+
+/// <summary>
+/// v0.9.3 (консилиум-раунд-2: Claude + Gemini + R1): (a) unsaved-наг — каждый ответ правки/чтения
+/// dirty-документа кричит «НЕ сохранено» (главная боль: агент забыл save → тесты по старому коду);
+/// (b) replace_content с границами — бойлерплейт лечится scope, а не удлинением сниппета;
+/// (c) edit_transaction без save отчитывается unsavedFiles.
+/// </summary>
+static class V093Nag {
+    public static void Run(string dir) {
+        var tools = new ToolRegistry();
+        tools.RegisterEditTools();
+        string nl = ((char)10).ToString();
+        string J(string path) => path.Replace("\\", "\\\\");
+
+        // (a) unsaved-наг: правка → unsaved:true; save → show → unsaved:false
+        string p = Path.Combine(dir, "nag.txt");
+        File.WriteAllText(p, "hello" + nl);
+        var mut = JsonSerializer.Deserialize<MutationResult>(
+            tools.CallAsync("replace_lines", JsonDocument.Parse($$"""{"path":"{{J(p)}}","start":1,"end":1,"new_text":"HELLO"}""").RootElement.Clone(), default).GetAwaiter().GetResult(),
+            RpcJson.Default.MutationResult)!;
+        SelfTest.CheckPublic(mut.Unsaved, "nag: правка отвечает unsaved=true — не забудь save");
+        _ = tools.CallAsync("save", JsonDocument.Parse($$"""{"path":"{{J(p)}}"}""").RootElement.Clone(), default).GetAwaiter().GetResult();
+        var sh = JsonSerializer.Deserialize<ShowResult>(
+            tools.CallAsync("show", JsonDocument.Parse($$"""{"path":"{{J(p)}}","start":1,"end":1}""").RootElement.Clone(), default).GetAwaiter().GetResult(),
+            RpcJson.Default.ShowResult)!;
+        SelfTest.CheckPublic(!sh.Unsaved, "nag: после save чтение отвечает unsaved=false");
+
+        // (b) replace_content + scope: dup в двух местах — без границ ambiguous, с границей применяется
+        string q = Path.Combine(dir, "nag-scope.txt");
+        File.WriteAllText(q, "x dup x" + nl + "filler" + nl + "filler" + nl + "y dup y" + nl);
+        ToolException? amb = null;
+        try { _ = tools.CallAsync("replace_content", JsonDocument.Parse($$"""{"path":"{{J(q)}}","find":"dup","replace":"D"}""").RootElement.Clone(), default).GetAwaiter().GetResult(); }
+        catch (ToolException t) { amb = t; }
+        SelfTest.CheckPublic(amb is not null && amb.Kind == "ambiguous_match" && amb.Message.Contains("start_line"),
+            "nag: ambiguous подсказывает границы скопа");
+        var rc = JsonSerializer.Deserialize<MutationResult>(
+            tools.CallAsync("replace_content", JsonDocument.Parse($$"""{"path":"{{J(q)}}","find":"dup","replace":"D","start_line":4,"end_line":4}""").RootElement.Clone(), default).GetAwaiter().GetResult(),
+            RpcJson.Default.MutationResult)!;
+        SelfTest.CheckPublic(rc.Rev == 1 && rc.Unsaved, "nag: scope сузил до уникального — применилось (unsaved=true)");
+
+        // (c) edit_transaction без save → unsavedFiles
+        string t1 = Path.Combine(dir, "nag-t1.txt"); File.WriteAllText(t1, "a" + nl);
+        string t2 = Path.Combine(dir, "nag-t2.txt"); File.WriteAllText(t2, "b" + nl);
+        var tx = JsonSerializer.Deserialize<TransactionResult>(
+            tools.CallAsync("edit_transaction", JsonDocument.Parse($$"""{"steps":[{"path":"{{J(t1)}}","edits":[{"start":1,"end":1,"new_text":"A"}]},{"path":"{{J(t2)}}","edits":[{"start":1,"end":1,"new_text":"B"}]}]}""").RootElement.Clone(), default).GetAwaiter().GetResult(),
+            RpcJson.Default.TransactionResult)!;
+        SelfTest.CheckPublic(tx.UnsavedFiles == 2, "nag: транзакция без save отчитывается unsavedFiles=2");
+
+        foreach (var f in new[] { p, q, t1, t2 })
+            _ = tools.CallAsync("close", JsonDocument.Parse($$"""{"path":"{{J(f)}}","discard":true}""").RootElement.Clone(), default).GetAwaiter().GetResult();
+    }
+}
+
+/// <summary>
 static class V082Polish {
     public static void Run(string dir) {
         const string Lf = "\n";

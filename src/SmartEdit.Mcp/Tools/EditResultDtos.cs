@@ -50,6 +50,7 @@ public sealed class ShowResult {
     public string Text { get; set; } = "";
     public bool Truncated { get; set; }
     public string[]? Events { get; set; } // v0.4: чужие правки с твоего last_seen (null = не отставал)
+    public bool Unsaved { get; set; }     // v0.9.3 (Claude): в документе есть НЕСОХРАНЁННЫЕ правки — save(path) перед внешними тулами (git/тесты/bash)
 }
 
 public sealed class FindResult {
@@ -82,6 +83,7 @@ public sealed class MutationResult {
     public bool Recovered { get; set; }              // v0.7 (#1): применено после auto-recovery из stale_rev
     public string[]? Intervening { get; set; }       // что меняли чужие правки, пока твой rev устарел
     public DiagDto[]? Diagnostics { get; set; }      // v0.8: структурные якоря (line/code/message), null = чисто
+    public bool Unsaved { get; set; }                 // v0.9.3: правка применена в RAM, но НЕ сохранена — не забудь save(path)
 }
 
 /// <summary>Per-file итог edit_transaction (#3).</summary>
@@ -102,6 +104,7 @@ public sealed class TransactionResult {
     public bool SaveRequested { get; set; }
     public int Applied { get; set; }
     public List<TxFileDto> Files { get; set; } = [];
+    public int UnsavedFiles { get; set; } // v0.9.3: файлов с неприменённым save — сохрани каждый (save(path))
 }
 
 /// <summary>Структурная диагностика в ответе правки: якорная строка + машинный код + текст.</summary>
@@ -218,6 +221,7 @@ public sealed class BatchResult {
     public bool Recovered { get; set; }          // v0.7 (#1)
     public string[]? Intervening { get; set; }   // v0.7 (#1)
     public DiagDto[]? Diagnostics { get; set; }  // v0.8
+    public bool Unsaved { get; set; }             // v0.9.3: применяется в RAM, НЕ сохранено — save(path)
 }
 
 public sealed class ReplaceAllResult {
@@ -227,6 +231,7 @@ public sealed class ReplaceAllResult {
     public int[] Lines { get; set; } = [];
     public bool DryRun { get; set; }
     public string[]? Brackets { get; set; }
+    public bool Unsaved { get; set; }             // v0.9.3
 }
 
 // ── v0.3.1: диагностика сессий ──

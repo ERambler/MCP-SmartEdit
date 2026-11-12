@@ -200,6 +200,7 @@ SMARTEDIT — GOLDEN RULES
 - expected_rev is OPTIONAL (omit = the last rev you observed — the server tracks it); pin it to assert no peer raced you
 - expect_old = exact current text of the range — your guard against your own wrong-line math
 - stale rev auto-recovers by default (response: recovered:true + intervening) — usually you do nothing
+- v0.9.3: every edit/show response on a DIRTY document carries unsaved:true — SAVE before running external tools (git/tests/bash see the OLD disk code)
 - errors are JSON {kind,...} — branch on kind, never parse prose; machine retry: {strategy: reissue_with_rev|reanchor|reread_range, start?, end?}
 
 TOOL MAP

@@ -20,6 +20,7 @@ sealed class ReplaceContentTool : ITool {
         "The snippet must occur EXACTLY ONCE: 0 matches → kind=not_found (copy it exactly from a fresh show/find — whitespace matters); " +
         ">1 → kind=ambiguous_match listing the matching lines (extend the snippet with surrounding lines to make it unique). " +
         "Multiline snippets and partial-line matches are supported (surrounding text on the first/last line is preserved). " +
+        "Optional start_line/end_line narrow the search scope — the boilerplate antidote: the snippet must be unique WITHIN the bounds. " +
         "replace='' deletes the snippet. Same rev/dry_run contract as replace_lines; diagnostics returned as usual.";
     public string InputSchemaJson => """
         {"type":"object","properties":{
@@ -27,6 +28,8 @@ sealed class ReplaceContentTool : ITool {
           "find":{"type":"string","description":"exact text to replace (multiline OK; must be unique in the file)"},
           "replace":{"type":"string","description":"replacement text ('' = delete the snippet)"},
           "expected_rev":{"type":"integer","description":"optional: omit = the last rev you observed (server tracks it)"},
+          "start_line":{"type":"integer","description":"optional: scan from this line (1-based) — narrows uniqueness scope"},
+          "end_line":{"type":"integer","description":"optional: scan up to this line inclusive"},
           "dry_run":{"type":"boolean","description":"default false"}
         },"required":["find","replace"]}
         """;
@@ -42,11 +45,15 @@ sealed class ReplaceContentTool : ITool {
         int expectedRev = args.GetInt("expected_rev", att.LastSeenRev);
         string[] fl = find.Replace("\r\n", "\n").Split('\n');
         string[] rl = replace.Replace("\r\n", "\n").Split('\n');
+        int scopeFrom = Math.Max(1, args.GetInt("start_line", 1));   // v0.9.3 (Gemini): сужение скопа для бойлерплейта
+        int scopeTo = args.GetInt("end_line", 0);                     // 0 = до конца файла
 
         var outcome = await ToolOps.LockedAsync(s, () => {
             // скан под локом: список вхождений (startLine, endLine, prefixLen, lastConsumed)
             var hits = new List<(int Start, int End, int Prefix, int Consumed)>();
-            for (int i = 1; i <= s.TotalLines && hits.Count <= 10; i++) {
+            int lim = scopeTo > 0 ? Math.Min(scopeTo, s.TotalLines) : s.TotalLines;
+            if (scopeFrom > lim) throw new ToolException(ToolException.InvalidRange, $"empty scope: start_line {scopeFrom} > end_line {lim}");
+            for (int i = scopeFrom; i <= lim && hits.Count <= 10; i++) {
                 string line = s.GetLineText(i);
                 if (fl.Length == 1) {
                     int pos = 0;
@@ -58,7 +65,7 @@ sealed class ReplaceContentTool : ITool {
                     // первая строка сниппета кончается концом строки i; средние — точные строки; последняя — префикс строки i+k
                     if (!line.EndsWith(fl[0], StringComparison.Ordinal)) continue;
                     int last = i + fl.Length - 1;
-                    if (last > s.TotalLines) continue;
+                    if (last > lim) continue; // вхождение должно целиком лежать в скопе
                     bool ok = true;
                     for (int m = 1; m < fl.Length - 1 && ok; m++)
                         if (s.GetLineText(i + m) != fl[m]) ok = false;
@@ -68,11 +75,11 @@ sealed class ReplaceContentTool : ITool {
             }
             if (hits.Count == 0)
                 throw new ToolException("not_found",
-                    "snippet not found — copy it exactly from a fresh show/find (whitespace/indentation matter; the file may have changed)");
+                    $"snippet not found{(scopeTo > 0 ? $" in lines {scopeFrom}..{lim}" : "")} — copy it exactly from a fresh show/find (whitespace/indentation matter; the file may have changed)");
             if (hits.Count > 1)
                 throw new ToolException("ambiguous_match",
                     $"snippet occurs {hits.Count} times: lines {string.Join(", ", hits.Take(10).Select(h => h.Start))} — " +
-                    "extend it with surrounding lines to make it unique");
+                    "extend it with surrounding lines, or narrow the scope with start_line/end_line");
             var (start, end, prefix, consumed) = hits[0];
             string expectOld = string.Join("\n", Enumerable.Range(start, end - start + 1).Select(s.GetLineText));
             // новый текст диапазона: префикс + замена + хвост последней строки
@@ -88,6 +95,7 @@ sealed class ReplaceContentTool : ITool {
             Brackets = outcome.Brackets?.ToArray(),
             Recovered = outcome.Recovered, Intervening = outcome.Intervening?.ToArray(),
             Diagnostics = outcome.Diags?.Select(d => new DiagDto { Line = d.Line, Code = d.Code, Message = d.Message }).ToArray(),
+            Unsaved = s.Dirty, // v0.9.3: применено в RAM, НЕ сохранено — не забудь save(path)
         }, RpcJson.Default.MutationResult);
     }
 }

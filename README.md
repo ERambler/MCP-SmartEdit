@@ -2,12 +2,12 @@
 
 **Line-based text editor for LLM agents.** A zero-dependency [Model Context Protocol](https://modelcontextprotocol.io) stdio server that lets coding agents edit files by **line numbers** — no byte-exact `old_string` to drift out of sync, no whole files loaded into context. Works with any MCP client: **ZCode, Claude Desktop, Cursor, Windsurf, Cline** and anything else that speaks stdio MCP.
 
-[![Version](https://img.shields.io/badge/version-v0.9.2-blue)](https://github.com/ERambler/MCP-SmartEdit/releases)
+[![Version](https://img.shields.io/badge/version-v0.9.3-blue)](https://github.com/ERambler/MCP-SmartEdit/releases)
 [![CI](https://github.com/ERambler/MCP-SmartEdit/actions/workflows/ci.yml/badge.svg)](https://github.com/ERambler/MCP-SmartEdit/actions/workflows/ci.yml)
 [![.NET](https://img.shields.io/badge/.NET-10-purple)](https://dotnet.microsoft.com/download/dotnet/10.0)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-stdio%20server-orange)](https://modelcontextprotocol.io)
-[![Selftest](https://img.shields.io/badge/selftest-231%20checks%20ALL%20PASS-brightgreen)](#verification)
+[![Selftest](https://img.shields.io/badge/selftest-237%20checks%20ALL%20PASS-brightgreen)](#verification)
 
 ```text
 the #1 failure mode of built-in Edit tools:
@@ -62,7 +62,8 @@ One shared document per file path: every editor sees one piece table and one rev
 - **Crash-safe save**: `save` writes to a temp file and atomically renames (`.smartedit-bak` kept) — power loss mid-save never corrupts the original.
 - **Cross-process guard (v0.9.2)**: two SmartEdit instances never fight over a file — the second gets an explicit `cross_process_lock` at first touch (pids are in the shared journal), instead of an opaque EBUSY at save time.
 - Encoding safety (cp1251/UTF-16 open + round-trip, `convert`, save keeps the original encoding by default), `replace_all` with refuse-entirely semantics, `file_info`, `sessions` diagnostics, insert into empty files via `[1..0]`.
-- Encoding safety (cp1251/UTF-16 open + round-trip, `convert`, save keeps the original encoding by default), `replace_all` with refuse-entirely semantics, `file_info`, `sessions` diagnostics, insert into empty files via `[1..0]`.
+
+**Ships with a battle-tested agent skill** (the usage protocol that makes agents confidently prefer the right tool — hard rules, when-SmartEdit vs when-Edit, the find→show→replace loop): [skills/zcode-smartedit/SKILL.md](skills/zcode-smartedit/SKILL.md), with a guide to authoring your own: [skills/README.md](skills/README.md).
 
 ## Performance (measured, see [Verification](#verification))
 
@@ -173,15 +174,14 @@ save(sessionId)   // peers_dirty if someone else is mid-flight; force:true publi
 ```
 
 Every mutation response carries: new `rev`, unified `diff`, structured `diagnostics` with anchors, and (in shared files) the `events` you missed. Every error is JSON with a machine-readable `kind`.
-
 ## Verification
 
-- `SmartEdit.Mcp.exe selftest` — ~190 checks: five-language literal fixtures (raw strings, f-strings, template literals, C++ raw), diagnostics anchors, stale-recovery scenarios (anchor/untouched/shifted/hijacked), save-torture (mutation stream with byte-exact disk verification after every save), encodings, collaboration, undo, 300 MB big-file flow, full protocol round-trip. Exit code 0/1 — used as the CI gate on every push and tag.
+- `SmartEdit.Mcp.exe selftest` — 237 checks: five-language literal fixtures (raw strings, f-strings, template literals, C++ raw), diagnostics anchors, stale-recovery scenarios (anchor/untouched/shifted/hijacked), save-torture (mutation stream with byte-exact disk verification after every save), encodings, collaboration, undo, 300 MB big-file flow, full protocol round-trip, corpus fuzz (every repo .cs file must pass the bracket audit). Exit code 0/1 — used as the CI gate on every push and tag.
 - Cold-start and per-call timings measured on the release binary; per-call milliseconds are written to the shared journal so anyone can audit performance.
 
 ## Changelog
 
-Full history in [CHANGELOG.md](CHANGELOG.md). Recent: **v0.9** path-first API (every tool takes `path` — the `open` ritual is dead; `expected_rev` optional), `edit_transaction` (#3) multi-file all-or-nothing, lexer fix for `//` comments; **v0.8.2** unlock-when-clean (clean sessions never lock files; dirty hold until save); **v0.8.1** self-documenting API (`help`) + structured retry/span/truncated; **v0.8** honest brackets + anchored diagnostics + recovery by default; **v0.7** stale-rev auto-recovery, telemetry hygiene, session GC; **v0.6** update check with silent self-install, code outline in `open`, CI gate, self-contained asset.
+Full history in [CHANGELOG.md](CHANGELOG.md). Recent: **v0.9.3** unsaved nag in every response + `replace_content` scope bounds + `server_version` in errors; **v0.9.2** cross-process guard + corpus fuzz; **v0.9.1** `replace_content` (edit by exact text) + honest force-hint; **v0.9** path-first API (the `open` ritual is dead) + `edit_transaction` (#3) + lexer fix; **v0.8.2** unlock-when-clean; **v0.8.1** self-documenting API (`help`); **v0.8** honest brackets + anchored diagnostics; **v0.7** stale-rev auto-recovery, telemetry hygiene, session GC.
 
 ## License
 

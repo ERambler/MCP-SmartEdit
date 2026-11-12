@@ -191,6 +191,7 @@ sealed class ShowTool : ITool {
         return ToolOps.Json(new ShowResult {
             Rev = s.Rev, TotalLines = s.TotalLines, Start = start, End = end, Text = text, Truncated = truncated,
             Events = events,
+            Unsaved = s.Dirty, // v0.9.3: есть несохранённые правки — save(path) перед git/тестами/bash
         }, RpcJson.Default.ShowResult);
     }
 }
@@ -277,6 +278,7 @@ sealed class ReplaceLinesTool : ITool {
             Brackets = outcome.Brackets?.ToArray(),
             Recovered = outcome.Recovered, Intervening = outcome.Intervening?.ToArray(),
             Diagnostics = outcome.Diags?.Select(d => new DiagDto { Line = d.Line, Code = d.Code, Message = d.Message }).ToArray(),
+            Unsaved = s.Dirty, // v0.9.3: применено в RAM, НЕ сохранено — не забудь save(path)
         }, RpcJson.Default.MutationResult);
     }
 }
@@ -365,6 +367,7 @@ sealed class InsertAfterTool : ITool {
         return ToolOps.Json(new MutationResult {
             Rev = outcome.Rev, TotalLines = outcome.TotalLines, Diff = outcome.Diff, DryRun = outcome.DryRun,
             Brackets = outcome.Brackets?.ToArray(),
+            Unsaved = s.Dirty, // v0.9.3: применено в RAM, НЕ сохранено — не забудь save(path)
         }, RpcJson.Default.MutationResult);
     }
 }

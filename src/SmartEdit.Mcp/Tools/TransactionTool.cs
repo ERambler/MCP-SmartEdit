@@ -119,8 +119,9 @@ sealed class TransactionTool : ITool {
                         try { doc.Save(false, "keep", false, f.SessionId); f.SavedOk = true; }
                         catch (ToolException ex) { f.SavedOk = false; f.SaveError = $"{ex.Kind}: {ex.Message}"; }
                     }
-                return ToolOps.Json(new TransactionResult { DryRun = dryRun, SaveRequested = save, Applied = files.Sum(f => f.Applied), Files = files },
-                    RpcJson.Default.TransactionResult);
+                return ToolOps.Json(new TransactionResult { DryRun = dryRun, SaveRequested = save, Applied = files.Sum(f => f.Applied), Files = files,
+                    UnsavedFiles = dryRun ? 0 : files.Count(f => f.SavedOk != true) // v0.9.3: сохрани каждый
+                }, RpcJson.Default.TransactionResult);
             }
             finally {
                 for (int i = ordered.Count - 1; i >= 0; i--) ordered[i].Gate.Release();
