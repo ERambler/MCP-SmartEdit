@@ -57,7 +57,9 @@ One shared document per file path: every editor sees one piece table and one rev
 - **`calc`** — exact arithmetic (hex/bin/`^`/`!`/functions); LLMs should not do mental math.
 
 ### Also on board
-Encoding safety (cp1251/UTF-16 open + round-trip, `convert`, save keeps the original encoding by default), `replace_all` with refuse-entirely semantics, `file_info`, `sessions` diagnostics, insert into empty files via `[1..0]`.
+- **Crash-safe save**: `save` writes to a temp file and atomically renames (`.smartedit-bak` kept) — power loss mid-save never corrupts the original.
+- **External-change awareness**: while a session is idle (file handle released), git/formatters can replace the file — the next tool call detects it and transparently starts fresh (rev=0, new content); file deleted/moved → `disk_conflict` with a retry hint, never a crash.
+- Encoding safety (cp1251/UTF-16 open + round-trip, `convert`, save keeps the original encoding by default), `replace_all` with refuse-entirely semantics, `file_info`, `sessions` diagnostics, insert into empty files via `[1..0]`.
 
 ## Performance (measured, see [Verification](#verification))
 
@@ -108,7 +110,7 @@ Learned the hard way:
 - **A skill file is NOT a server registration.** The skill only teaches *when* to call the tools; without the `mcp.servers` entry the `mcp__smartedit__*` tools never appear.
 - New server = **new chat session** (no hot reload). Restart the client or open a new conversation after editing the config.
 - The exe is **locked while a session uses it**: to upgrade, close chats / `Stop-Process -Name SmartEdit.Mcp`, overwrite, reopen — or just click OK on the update dialog, it handles this for you.
-- An open session holds its file `FileShare.Read` — external writers get EBUSY until `close`. Intentional; call `sessions` if a file feels locked.
+- **Locks (v0.8.2+)**: a CLEAN session never holds its file between tool calls — git/formatters/scripts write freely. Only a DIRTY session (unsaved edits) holds the file until save/close — that's protection for the edit base, call `save` or `close(discard)` to release. If a file feels locked, `sessions` shows who.
 - Optional companion skill (usage protocol, smart vs built-in edit): copy [`skills/zcode-smartedit/SKILL.md`](skills/zcode-smartedit/SKILL.md) to `~/.zcode/skills/smartedit/SKILL.md`. **Writing your own skill for another agent/client?** Read [`skills/README.md`](skills/README.md) first — a field-tested guide on authoring skills that make agents confidently prefer the right tool.
 
 ### Claude Desktop
