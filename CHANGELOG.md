@@ -1,6 +1,13 @@
 # Changelog
 
 
+## v0.9.1 (2026-11-13)
+
+- **`replace_content` — edit by exact text, no line numbers** (external dogfooding report: "~6 line-math errors in one session; the winning combo is find→show→replace WITH an anchor" — this removes the line math entirely). Replaces an exact snippet (multiline; partial-line matches keep the surrounding text); must occur EXACTLY once: 0 → `not_found`, >1 → `ambiguous_match` listing the matching lines. Applies through the same anchored pipeline (expect_old + diagnostics). 23 tools
+- **`disk_conflict` hint no longer invites destruction**: was "pass force=true to overwrite anyway" — agents obediently forced and clobbered external fixes (a real incident in the report: a stale session reverted a fix). Now: "SHOW the range and RE-APPLY on top; force=true DISCARDS the on-disk version (destructive)" — in the error, the save tool description and the help page
+- Also from the report, verified: `edit_batch` with empty `new_text` (range deletion) works on current — not reproducible; the bracket false-positives were the v0.9 lexer bug (fixed here)
+- Selftests: +6 (unique / ambiguous / not-found / multiline-partial / empty-replace / empty-find) — 228 total, ALL PASS
+
 ## v0.9.0 (2026-11-12)
 
 - **path-first API — the `open` ritual is dead**: EVERY session tool now accepts `path` directly (`show(path, ...)`, `replace_lines(path, ...)`, `save(path)`, even `close(path)`); the server attaches you to the shared document on first use and reuses it on every subsequent call. `open` remains for its unique payload (code_outline preview, note, encoding) but is never a prerequisite. Passing both `session_id` and `path` → `ambiguous_target`. Schemas updated honestly: `session_id` is no longer in any `required` array

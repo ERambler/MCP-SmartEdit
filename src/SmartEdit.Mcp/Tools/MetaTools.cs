@@ -209,6 +209,7 @@ edit     : replace_lines(start,end,new_text,expected_rev,expect_old?) | insert_a
           edit_batch(edits≤200, atomic, bottom-up = no shift math) | replace_all(literal, refuse-if-too-many)
           edit_transaction(steps[{path|session_id, edits}], save?) — MULTI-FILE all-or-nothing: every range/anchor
           validated on all files BEFORE anything applies; one bad step aborts everything (kind=transaction_aborted)
+          replace_content(find, replace) — EXACT text, no line numbers; must be unique (0 → not_found, >1 → ambiguous_match)
           undo(n, expected_rev) — undo×2 = redo, peer-safe compensating mutations
 lifecycle: save(keeps encoding; force=true publishes peers' edits too) | close(discard?) | sessions | sync
 ops      : check(bracket audit) | log(tail/grep/errors_only — shared journal) | calc(exact math) | convert(encoding)
@@ -220,7 +221,8 @@ anchor_mismatch  → your line math is off — the error names the line, found v
 invalid_range / batch_overlap → fix coordinates; ranges in one batch must be disjoint
 unknown_session  → session gone (GC after 30 min idle?): open again
 peers_dirty      → someone mid-flight: wait, or save(force=true) publishes THEIR edits too
-disk_conflict    → file changed on disk since open: force=true overwrites
+disk_conflict    → file changed on disk since open: SHOW the range and RE-APPLY on top; force=true DISCARDS the on-disk version
+not_found / ambiguous_match (replace_content) → copy the snippet exactly from a fresh show/find / extend it to be unique
 too_large        → over a cap: split the work
 diagnostics (in every edit response): [{line, code, message}] — bracket_mismatch, never_closed, stray_closer,
 unterminated_literal/comment/hole; unterminated_literal anchors the OPENING line. [] = clean.

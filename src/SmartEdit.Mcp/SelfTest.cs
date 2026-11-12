@@ -52,6 +52,7 @@ public static class SelfTest {
         V082Polish.Run(dir);
         V082Lock.Run(dir);
         V090PathTxn.Run(dir);
+        V091Content.Run(dir);
         V03Features.BatchAndAnchors(dir);
         await V03Features.StructuredErrorsAsync(dir);
         V03Features.ReplaceAllTests(dir);
@@ -288,7 +289,7 @@ public static class SelfTest {
         SelfTest.Check(err is null && res!.Value.GetProperty("serverInfo").GetProperty("name").GetString() == "smartedit", "proto: initialize");
 
         (res, err) = await h.HandleAsync(new RpcRequest { Method = "tools/list", Id = J("2") });
-        SelfTest.Check(err is null && res!.Value.GetProperty("tools").GetArrayLength() == 22, "proto: 22 инструмента (v0.9 + edit_transaction)");
+        SelfTest.Check(err is null && res!.Value.GetProperty("tools").GetArrayLength() == 23, "proto: 23 инструмента (v0.9.1 + replace_content)");
 
         string p = Path.Combine(dir, "proto.txt");
         File.WriteAllText(p, "1\n2\n3\n");
@@ -1292,6 +1293,66 @@ static class V090PathTxn {
     }
 }
 
+/// <summary>
+/// v0.9.1 (внешний dogfooding-отчёт): replace_content — замена точного текста без номеров строк.
+/// Уникальность обязательна: 0 → not_found, >1 → ambiguous_match со списком строк.
+/// Многострочные сниппеты и частичные строки; пустой replace = удаление сниппета.
+/// </summary>
+static class V091Content {
+    public static void Run(string dir) {
+        var tools = new ToolRegistry();
+        tools.RegisterEditTools();
+        string nl = ((char)10).ToString();
+        string J(string path) => path.Replace("\\", "\\\\");
+        string Call(string json) => tools.CallAsync("replace_content", JsonDocument.Parse(json).RootElement.Clone(), default).GetAwaiter().GetResult();
+        ToolException? Err(string json) {
+            try { Call(json); return null; }
+            catch (ToolException t) { return t; }
+        }
+
+        string p = Path.Combine(dir, "rc.txt");
+        File.WriteAllText(p,
+            "alpha start" + nl + "middle one" + nl + "middle two end" + nl + "tail" + nl);
+
+        // (a) многострочный сниппет с частичными строками: хвосты первой/последней строки сохранены
+        string raw = Call($$"""{"path":"{{J(p)}}","find":"rt\nmiddle one\nmiddle two en","replace":"RT\nMID"}""");
+        var m = JsonSerializer.Deserialize<MutationResult>(raw, RpcJson.Default.MutationResult)!;
+        SelfTest.CheckPublic(m.Rev == 1, "rc: применён без явного rev (LastSeenRev-цепочка)");
+        var sh = JsonSerializer.Deserialize<ShowResult>(
+            tools.CallAsync("show", JsonDocument.Parse($$"""{"path":"{{J(p)}}","start":1,"end":3}""").RootElement.Clone(), default).GetAwaiter().GetResult(),
+            RpcJson.Default.ShowResult)!;
+        SelfTest.CheckPublic(sh.Text.Contains("alpha staRT") && sh.Text.Contains("MIDd") && sh.Text.Contains("tail"),
+            "rc: многострочный partial — префикс/суффикс на месте");
+
+        // (b) неоднозначность: сниппет на двух строках → ambiguous_match с номерами
+        string q = Path.Combine(dir, "rc-dup.txt");
+        File.WriteAllText(q, "x dup x" + nl + "y dup y" + nl);
+        var amb = Err($$"""{"path":"{{J(q)}}","find":"dup","replace":"D"}""");
+        SelfTest.CheckPublic(amb is not null && amb.Kind == "ambiguous_match" && amb.Message.Contains("1") && amb.Message.Contains("2"),
+            "rc: два вхождения → ambiguous_match со списком строк");
+
+        // (c) не найдено → not_found
+        var nf = Err($$"""{"path":"{{J(q)}}","find":"no such snippet","replace":"D"}""");
+        SelfTest.CheckPublic(nf is not null && nf.Kind == "not_found", "rc: 0 вхождений → not_found");
+
+        // (d) пустой replace = удаление сниппета, остатки строки сливаются
+        string d = Path.Combine(dir, "rc-del.txt");
+        File.WriteAllText(d, "keep [junk] keep" + nl);
+        _ = Call($$"""{"path":"{{J(d)}}","find":" [junk] ","replace":""}""");
+        var sd = JsonSerializer.Deserialize<ShowResult>(
+            tools.CallAsync("show", JsonDocument.Parse($$"""{"path":"{{J(d)}}","start":1,"end":1}""").RootElement.Clone(), default).GetAwaiter().GetResult(),
+            RpcJson.Default.ShowResult)!;
+        SelfTest.CheckPublic(sd.Text.Contains("keepkeep"), "rc: пустой replace удаляет сниппет, строка сшивается");
+
+        // (e) пустой find → invalid_args (для массового переименования есть replace_all)
+        var ef = Err($$"""{"path":"{{J(d)}}","find":"","replace":"x"}""");
+        SelfTest.CheckPublic(ef is not null && ef.Kind == ToolException.InvalidArgs, "rc: пустой find → invalid_args");
+
+        // прибраться по путям
+        foreach (var f in new[] { p, q, d })
+            _ = tools.CallAsync("close", JsonDocument.Parse($$"""{"path":"{{J(f)}}","discard":true}""").RootElement.Clone(), default).GetAwaiter().GetResult();
+    }
+}
 /// <summary>v0.8.1 (#1-3): структурный retry, outline totals/truncated, find span.</summary>
 static class V082Polish {
     public static void Run(string dir) {
@@ -1348,7 +1409,7 @@ static class V081Help {
             "help: семантика диапазонов на странице");
         SelfTest.CheckPublic(page.Contains("stale_conflict") && page.Contains("anchor_mismatch") && page.Contains("peers_dirty"),
             "help: error kinds с действиями");
-        SelfTest.CheckPublic(new[] { "edit_batch", "edit_transaction", "replace_all", "undo", "goto", "sessions", "calc", "path-first" }.All(t => page.Contains(t)),
+        SelfTest.CheckPublic(new[] { "edit_batch", "edit_transaction", "replace_content", "replace_all", "undo", "goto", "sessions", "calc", "path-first" }.All(t => page.Contains(t)),
             "help: все ключевые инструменты в карте");
         SelfTest.CheckPublic(page.Length < 6000, $"help: компактен ({page.Length} симв.) — один вызов, не простыня");
     }

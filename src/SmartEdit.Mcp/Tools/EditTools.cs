@@ -32,7 +32,8 @@ public static class EditToolsRegistration {
         tools.Register(new UndoTool());
         tools.Register(new GotoTool()); // v0.5
         tools.Register(new HelpTool());
-        tools.Register(new TransactionTool()); // v0.9 (#3): 22 инструмента
+        tools.Register(new TransactionTool()); // v0.9 (#3)
+        tools.Register(new ReplaceContentTool()); // v0.9.1: 23 инструмента — замена точного текста без номеров строк
     }
 }
 
@@ -371,7 +372,7 @@ sealed class InsertAfterTool : ITool {
 sealed class SaveTool : ITool {
     public string Name => "save";
     public string Description =>
-        "Write edits to disk: atomic temp+rename, .smartedit-bak backup (backup=true), rejects if the file changed on disk since open unless force=true. " +
+        "Write edits to disk: atomic temp+rename, .smartedit-bak backup (backup=true), rejects if the file changed on disk since open; force=true DISCARDS the on-disk version (prefer show + re-apply). " +
         "encoding: 'keep' (default — original encoding/BOM preserved) or 'utf8' (no BOM, converts). Session stays open; rev does NOT change (save does not renumber lines).";
     public string InputSchemaJson => """
         {"type":"object","properties":{

@@ -35,10 +35,23 @@ and auto-recovery if a peer raced you.
 1. `show(path, 1..N)` / `find(path, regex, context=2)` / `goto(path, name)` — path directly, no open (v0.9)
 2. `open(path)` → sessionId, rev, code_outline, peers — only for its extras (outline/encoding/note); repeat open = attach to the shared document
 3. One edit: `replace_lines(path, start, end, new_text, expect_old?)`;
+   have the EXACT text instead? `replace_content(path, find, replace)` — no line numbers, must be unique (v0.9.1);
    2+ edits in one file: `edit_batch(path, edits[])` — all ranges/anchors validated BEFORE applying, bottom-up, one rev bump;
    rename: `replace_all(path, find, replace)`;
    2+ FILES: `edit_transaction(steps[])` — all-or-nothing across files
 4. `save(path)` — keeps encoding by default; rev does NOT change on save
+
+## Hard rules (non-negotiable)
+
+- **SAVE is mandatory.** Edits live in server RAM — unsaved edits are LOST after 30 min idle or a server
+  restart. Finish every edit series with `save(path)`.
+- **Edit only what you just SAW.** After any intervening edits (yours or a peer's): `find` → `show` → replace.
+  NEVER edit by remembered line numbers — line math after shifts is the #1 error source in the field.
+- **All ranges in `edit_batch`/`edit_transaction` refer to the ORIGINAL state** (no shift math); when you have
+  the exact text, prefer `replace_content` — the uniqueness check anchors it for you.
+- **`force=true` DISCARDS the on-disk version** (`disk_conflict`/`peers_dirty`). Default: `show` the range and
+  re-apply on top of what's there.
+- New chat/session → `show`/`find` FIRST (the rev chain starts fresh).
 
 ## Semantics (critical)
 

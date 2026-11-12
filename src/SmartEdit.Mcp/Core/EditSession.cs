@@ -685,7 +685,8 @@ public sealed class EditSession : IDisposable {
         var fi = new FileInfo(Path);
         if ((fi.LastWriteTimeUtc != _diskMtimeUtc || fi.Length != _diskSize) && !force)
             throw new ToolException(ToolException.DiskConflict,
-                "file changed on disk since open (mtime/size mismatch) — pass force=true to overwrite anyway");
+                "file changed on disk since open — SHOW the current range and RE-APPLY your edit on top of it; " +
+                "force=true DISCARDS the on-disk version and publishes yours (destructive)");
 
         var enc = EncodingDetect.OutputEncoding(target);
         string temp = Path + ".smartedit-tmp";
