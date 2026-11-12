@@ -2,12 +2,12 @@
 
 **Line-based text editor for LLM agents.** A zero-dependency [Model Context Protocol](https://modelcontextprotocol.io) stdio server that lets coding agents edit files by **line numbers** — no byte-exact `old_string` to drift out of sync, no whole files loaded into context. Works with any MCP client: **ZCode, Claude Desktop, Cursor, Windsurf, Cline** and anything else that speaks stdio MCP.
 
-[![Version](https://img.shields.io/badge/version-v0.9.1-blue)](https://github.com/ERambler/MCP-SmartEdit/releases)
+[![Version](https://img.shields.io/badge/version-v0.9.2-blue)](https://github.com/ERambler/MCP-SmartEdit/releases)
 [![CI](https://github.com/ERambler/MCP-SmartEdit/actions/workflows/ci.yml/badge.svg)](https://github.com/ERambler/MCP-SmartEdit/actions/workflows/ci.yml)
 [![.NET](https://img.shields.io/badge/.NET-10-purple)](https://dotnet.microsoft.com/download/dotnet/10.0)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-stdio%20server-orange)](https://modelcontextprotocol.io)
-[![Selftest](https://img.shields.io/badge/selftest-228%20checks%20ALL%20PASS-brightgreen)](#verification)
+[![Selftest](https://img.shields.io/badge/selftest-231%20checks%20ALL%20PASS-brightgreen)](#verification)
 
 ```text
 the #1 failure mode of built-in Edit tools:
@@ -60,7 +60,8 @@ One shared document per file path: every editor sees one piece table and one rev
 
 ### Also on board
 - **Crash-safe save**: `save` writes to a temp file and atomically renames (`.smartedit-bak` kept) — power loss mid-save never corrupts the original.
-- **External-change awareness**: while a session is idle (file handle released), git/formatters can replace the file — the next tool call detects it and transparently starts fresh (rev=0, new content); file deleted/moved → `disk_conflict` with a retry hint, never a crash.
+- **Cross-process guard (v0.9.2)**: two SmartEdit instances never fight over a file — the second gets an explicit `cross_process_lock` at first touch (pids are in the shared journal), instead of an opaque EBUSY at save time.
+- Encoding safety (cp1251/UTF-16 open + round-trip, `convert`, save keeps the original encoding by default), `replace_all` with refuse-entirely semantics, `file_info`, `sessions` diagnostics, insert into empty files via `[1..0]`.
 - Encoding safety (cp1251/UTF-16 open + round-trip, `convert`, save keeps the original encoding by default), `replace_all` with refuse-entirely semantics, `file_info`, `sessions` diagnostics, insert into empty files via `[1..0]`.
 
 ## Performance (measured, see [Verification](#verification))

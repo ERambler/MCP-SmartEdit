@@ -221,6 +221,7 @@ anchor_mismatch  → your line math is off — the error names the line, found v
 invalid_range / batch_overlap → fix coordinates; ranges in one batch must be disjoint
 unknown_session  → session gone (GC after 30 min idle?): open again
 peers_dirty      → someone mid-flight: wait, or save(force=true) publishes THEIR edits too
+cross_process_lock→ ANOTHER SmartEdit process owns this file (two servers overwrite each other's saves): close it (pids in log) and retry
 disk_conflict    → file changed on disk since open: SHOW the range and RE-APPLY on top; force=true DISCARDS the on-disk version
 not_found / ambiguous_match (replace_content) → copy the snippet exactly from a fresh show/find / extend it to be unique
 too_large        → over a cap: split the work

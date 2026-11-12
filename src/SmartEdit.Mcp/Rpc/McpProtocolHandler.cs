@@ -7,7 +7,7 @@ namespace SmartEdit.Mcp.Rpc;
 
 /// <summary>Диспетчер MCP-методов: initialize, ping, tools/list, tools/call.</summary>
 public sealed class McpProtocolHandler(ToolRegistry tools) {
-    public const string ServerVersion = "0.9.1";
+    public const string ServerVersion = "0.9.2";
     public const string ProtocolVersion = "2025-06-18";
 
     /// <summary>

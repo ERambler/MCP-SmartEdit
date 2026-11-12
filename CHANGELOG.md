@@ -1,6 +1,12 @@
 # Changelog
 
 
+## v0.9.2 (2026-11-13)
+
+- **Cross-process coordination (#16, consilium Gemini+R1)**: two SmartEdit instances on the same file used to fight silently — the second's save hit an opaque EBUSY (or worse, clobbered). Now every document holds a named mutex on its canonical path for its lifetime; the second process gets an explicit `cross_process_lock` error at first touch, pointing to the shared journal for pids. Crashed owner → mutex auto-recovered (AbandonedMutexException handled)
+- **Corpus fuzz of the lexer (consilium)**: the selftest now scans ALL ~39 .cs files of this repo (fixtures inside strings included) and requires ZERO false bracket diagnostics — the "boy who cried wolf" reflex from the field report is now a locked regression, not weather
+- Selftests: +3 (cross-process lock/open-after-release, corpus) — 231 total, ALL PASS
+
 ## v0.9.1 (2026-11-13)
 
 - **`replace_content` — edit by exact text, no line numbers** (external dogfooding report: "~6 line-math errors in one session; the winning combo is find→show→replace WITH an anchor" — this removes the line math entirely). Replaces an exact snippet (multiline; partial-line matches keep the surrounding text); must occur EXACTLY once: 0 → `not_found`, >1 → `ambiguous_match` listing the matching lines. Applies through the same anchored pipeline (expect_old + diagnostics). 23 tools

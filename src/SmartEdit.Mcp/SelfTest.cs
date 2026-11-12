@@ -53,6 +53,7 @@ public static class SelfTest {
         V082Lock.Run(dir);
         V090PathTxn.Run(dir);
         V091Content.Run(dir);
+        V092CrossProcess.Run(dir);
         V03Features.BatchAndAnchors(dir);
         await V03Features.StructuredErrorsAsync(dir);
         V03Features.ReplaceAllTests(dir);
@@ -1351,6 +1352,73 @@ static class V091Content {
         // прибраться по путям
         foreach (var f in new[] { p, q, d })
             _ = tools.CallAsync("close", JsonDocument.Parse($$"""{"path":"{{J(f)}}","discard":true}""").RootElement.Clone(), default).GetAwaiter().GetResult();
+    }
+}
+
+/// <summary>
+/// v0.9.2 (#16): (a) межпроцессный named-mutex — второй процесс на том же файле получает явный
+/// cross_process_lock (а не невнятный EBUSY в момент save); (b) корпус-фаззинг лексера — все .cs
+/// собственного репозитория обязаны проходить скобочный аудит без единой ложной диагностики
+/// («мальчик-который-плакал-волки» из внешнего отчёта = регрессия, не погода).
+/// </summary>
+static class V092CrossProcess {
+    public static void Run(string dir) {
+        // (a) mutex, удерживаемый «другим процессом» → cross_process_lock
+        string f = Path.Combine(dir, "xproc.txt");
+        File.WriteAllText(f, "x" + ((char)10));
+        string name = EditSession.CrossProcessMutexName(Path.GetFullPath(f));
+        // named mutex реентерабелен В РАМКАХ ПОТОКА — «другой процесс» симулируем отдельным потоком-владельцем
+        using var held = new Mutex(false, name);
+        var acquired = new ManualResetEventSlim(false);
+        var release = new ManualResetEventSlim(false);
+        var owner = new Thread(() => {
+            held.WaitOne();
+            acquired.Set();
+            release.Wait();
+            held.ReleaseMutex();
+        });
+        owner.Start();
+        acquired.Wait();
+        try {
+            ToolException? tex = null;
+            try { _ = EditSession.Open(f, null); } catch (ToolException t) { tex = t; }
+            SelfTest.CheckPublic(tex is not null && tex.Kind == "cross_process_lock" && tex.RetryHint is not null,
+                "xproc: файл занят другим процессом → явный cross_process_lock с retry_hint (не EBUSY)");
+        }
+        finally { release.Set(); owner.Join(); }
+        using (var doc = EditSession.Open(f, null)) {
+            SelfTest.CheckPublic(doc.TotalLines == 1, "xproc: после освобождения мьютекса файл открывается");
+        }
+
+        // (b) корпус-фаззинг: собственное репо (~70 .cs, включая фикстуры в строках) — ноль шума
+        string? root = FindRepoRoot(AppContext.BaseDirectory);
+        if (root is null) {
+            SelfTest.CheckPublic(true, "xproc: корпус пропущен (запуск вне репо)");
+            return;
+        }
+        int files = 0;
+        var noise = new List<string>();
+        foreach (var cs in Directory.EnumerateFiles(Path.Combine(root, "src"), "*.cs", SearchOption.AllDirectories)) {
+            if (cs.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
+                || cs.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")) continue;
+            if (new FileInfo(cs).Length > 1_000_000) continue;
+            files++;
+            var s = EditSession.Open(cs, null);
+            var problems = s.CheckBrackets(0, 0);
+            if (problems.Count > 0) noise.Add($"{Path.GetFileName(cs)}: {problems[0]}");
+            s.Dispose();
+        }
+        SelfTest.CheckPublic(files > 20 && noise.Count == 0,
+            $"xproc: корпус {files} .cs без ложных диагностик" + (noise.Count > 0 ? " — ШУМ: " + string.Join("; ", noise.Take(3)) : ""));
+    }
+
+    static string? FindRepoRoot(string start) {
+        var d = new DirectoryInfo(start);
+        while (d is not null) {
+            if (Directory.Exists(Path.Combine(d.FullName, ".git"))) return d.FullName;
+            d = d.Parent;
+        }
+        return null;
     }
 }
 /// <summary>v0.8.1 (#1-3): структурный retry, outline totals/truncated, find span.</summary>

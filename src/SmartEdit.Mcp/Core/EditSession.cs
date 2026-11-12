@@ -83,7 +83,43 @@ public sealed class EditSession : IDisposable {
         if (!File.Exists(path)) throw new FileNotFoundException("file not found: " + path);
         var s = new EditSession(System.IO.Path.GetFullPath(path)); // Path — ещё и свойство класса
         s.Init(encodingOverride);
+        s.AcquireFileMutex(); // v0.9.2 (#16): после успешного открытия — межпроцессный лок (не течёт при ошибке Init)
         return s;
+    }
+
+    // ── v0.9.2 (#16): межпроцессная координация — named mutex на канонический путь документа.
+    // Два экземпляра SmartEdit.Mcp на одном файле молча перезаписывали бы save'ы друг друга
+    // (или ловили бы невнятный EBUSY от FileShare) — теперь второй получает явный cross_process_lock. ──
+
+    Mutex? _fileMutex;
+    bool _mutexOwned;
+
+    public static string CrossProcessMutexName(string canonicalPath) {
+        var hash = System.Security.Cryptography.SHA256.HashData(Encoding.ASCII.GetBytes(canonicalPath.ToLowerInvariant()));
+        return "Local\\SmartEdit.File." + Convert.ToHexString(hash)[..32];
+    }
+
+    void AcquireFileMutex() {
+        var mtx = new Mutex(false, CrossProcessMutexName(Path));
+        bool owned;
+        try { owned = mtx.WaitOne(0); } // мгновенно: чужой процесс держит → явный отказ, stdio не блокируем
+        catch (AbandonedMutexException) { owned = true; } // владелец умер — мьютекс наш
+        if (!owned) {
+            mtx.Dispose();
+            throw new ToolException("cross_process_lock",
+                $"another SmartEdit process has this file open — two servers would overwrite each other's saves; " +
+                "close the other instance (pids are in the shared journal: log(grep=\"update:\")) and retry",
+                retryHint: "retry after the other SmartEdit process closes the file");
+        }
+        _fileMutex = mtx; _mutexOwned = true;
+    }
+
+    void ReleaseFileMutex() {
+        if (!_mutexOwned) return;
+        _mutexOwned = false;
+        try { _fileMutex!.ReleaseMutex(); } catch { /* уже отпущен */ }
+        _fileMutex!.Dispose();
+        _fileMutex = null;
     }
 
     void Init(string? encodingOverride) {
@@ -802,6 +838,7 @@ public sealed class EditSession : IDisposable {
     // Close вызывается под Gate: семафор живёт дольше — его диспозит сам вызывающий (вне локера)
     void ReleaseResources() {
         try { _src?.Dispose(); } catch { }
+        ReleaseFileMutex();
         if (!_shadowKept) TryDeleteFile(Path + ".smartedit-shadow");
     }
 }
