@@ -16,6 +16,9 @@ public static class EditToolsRegistration {
         tools.Register(new InsertAfterTool());
         tools.Register(new SaveTool());
         tools.Register(new CloseTool());
+        tools.Register(new RecipeSaveTool());   // #8 (v0.11)
+        tools.Register(new RecipeListTool());
+        tools.Register(new RecipeApplyTool());
         // v0.2: структурное зрение и мета-утилиты
         tools.Register(new SymbolsTool());
         tools.Register(new CheckTool());
@@ -90,7 +93,8 @@ sealed class OpenTool : ITool {
         {"type":"object","properties":{
           "path":{"type":"string","description":"absolute file path"},
           "encoding":{"type":"string","description":"force: cp1251 | utf-16le | utf-16be (non-UTF-8 files); default: autodetect"},
-          "note":{"type":"string","description":"why you're editing (presence annotation for peers)"}
+          "note":{"type":"string","description":"why you're editing (presence annotation for peers)"},
+          "attention":{"type":"boolean","description":"#5 opt-in: track seen ranges (show/find/goto) — edits to unseen lines get a blind warning"}
         },"required":["path"]}
         """;
 
@@ -100,6 +104,7 @@ sealed class OpenTool : ITool {
         string? note = args.GetNullableString("note");
         var (att, reused) = Sessions.Attach(path, args.GetNullableString("encoding"), note);
         var s = att.Doc;
+        if (args.GetBool("attention")) s.Attention = true; // #5: свойство документа; off по умолчанию
         var peers = Sessions.Peers(s);
         // v0.6.2 (#2): outline в open-ответе; preview читает строки — потому ВСЁ под одним замком (#14)
         var (outlineSyms, outlineTotal, outlineTruncated, preview) = await ToolOps.LockedAsync(s, () => {
@@ -186,7 +191,11 @@ sealed class ShowTool : ITool {
         int start = args.GetRequiredInt("start");
         int end = args.GetRequiredInt("end");
         int maxChars = Math.Clamp(args.GetInt("max_chars", 20_000), 1_000, 200_000);
-        var (text, truncated) = await ToolOps.LockedAsync(s, () => s.Show(start, end, maxChars));
+        var (text, truncated) = await ToolOps.LockedAsync(s, () => {
+            var r = s.Show(start, end, maxChars);
+            s.MarkSeen(att.Id, start, Math.Min(end, s.TotalLines), "show"); // #5: показанное = увиденное
+            return r;
+        });
         string[]? events = Presence.EventsSince(s, att); // компактные события, если отстал по rev
         return ToolOps.Json(new ShowResult {
             Rev = s.Rev, TotalLines = s.TotalLines, Start = start, End = end, Text = text, Truncated = truncated,
@@ -220,7 +229,12 @@ sealed class FindTool : ITool {
         int afterLine = args.GetInt("after_line", 0);
         int maxHits = Math.Clamp(args.GetInt("max_hits", 20), 1, 200);
         int context = Math.Clamp(args.GetInt("context", 0), 0, 10);
-        var (hits, truncated) = await ToolOps.LockedAsync(s, () => s.Find(rx, afterLine, maxHits, context));
+        var (hits, truncated) = await ToolOps.LockedAsync(s, () => {
+            var r = s.Find(rx, afterLine, maxHits, context);
+            foreach (var h in r.Hits) // #5: сниппет find = увиденное; без context — сама строка хита
+                s.MarkSeen(att.Id, h.Snippet is null ? h.Line : h.SpanStart, h.Snippet is null ? h.Line : h.SpanEnd, "find");
+            return r;
+        });
         string[]? events = Presence.EventsSince(s, att);
         return ToolOps.Json(new FindResult {
             Rev = s.Rev,
@@ -279,6 +293,7 @@ sealed class ReplaceLinesTool : ITool {
             Recovered = outcome.Recovered, Intervening = outcome.Intervening?.ToArray(),
             Diagnostics = outcome.Diags?.Select(d => new DiagDto { Line = d.Line, Code = d.Code, Message = d.Message }).ToArray(),
             Unsaved = s.Dirty, // v0.9.3: применено в RAM, НЕ сохранено — не забудь save(path)
+            Blind = outcome.Blind, // #5: правка вслепую (только при open(attention:true))
         }, RpcJson.Default.MutationResult);
     }
 }
@@ -368,6 +383,7 @@ sealed class InsertAfterTool : ITool {
             Rev = outcome.Rev, TotalLines = outcome.TotalLines, Diff = outcome.Diff, DryRun = outcome.DryRun,
             Brackets = outcome.Brackets?.ToArray(),
             Unsaved = s.Dirty, // v0.9.3: применено в RAM, НЕ сохранено — не забудь save(path)
+            Blind = outcome.Blind, // #5
         }, RpcJson.Default.MutationResult);
     }
 }

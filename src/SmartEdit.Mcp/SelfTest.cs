@@ -56,6 +56,8 @@ public static class SelfTest {
         V092CrossProcess.Run(dir);
         V093Nag.Run(dir);
         V100Gate.Run(dir);
+        V110Attention.Run(dir);
+        V111Recipes.Run(dir);
         V03Features.BatchAndAnchors(dir);
         await V03Features.StructuredErrorsAsync(dir);
         V03Features.ReplaceAllTests(dir);
@@ -292,7 +294,7 @@ public static class SelfTest {
         SelfTest.Check(err is null && res!.Value.GetProperty("serverInfo").GetProperty("name").GetString() == "smartedit", "proto: initialize");
 
         (res, err) = await h.HandleAsync(new RpcRequest { Method = "tools/list", Id = J("2") });
-        SelfTest.Check(err is null && res!.Value.GetProperty("tools").GetArrayLength() == 23, "proto: 23 инструмента (v0.9.1 + replace_content)");
+        SelfTest.Check(err is null && res!.Value.GetProperty("tools").GetArrayLength() == 26, "proto: 26 инструментов (v0.11: +recipe_save/list/apply)");
 
         string p = Path.Combine(dir, "proto.txt");
         File.WriteAllText(p, "1\n2\n3\n");
@@ -1671,5 +1673,79 @@ static class V100Gate {
         SelfTest.Check(pyLimit.GateStatus == "pass",
             $"gate: python-отступы не ловим — документированное ограничение ({pyLimit.GateStatus})");
         s7.Dispose();
+    }
+}
+
+/// <summary>v0.11 #5: attention tracking — предупреждение о правке невиденного диапазона (opt-in).</summary>
+static class V110Attention {
+    public static void Run(string dir) {
+        string p = Path.Combine(dir, "att-off.cs");
+        File.WriteAllText(p, "class A {\n    int X = 1;\n}\n", new UTF8Encoding(false));
+        var s0 = EditSession.Open(p, null);
+        var m0 = s0.ReplaceLines(2, 2, "    int X = 2;", s0.Rev, false, null, "me");
+        SelfTest.Check(m0.Blind is null, "attention: по умолчанию выкл — предупреждения нет");
+        s0.Dispose();
+
+        string q = Path.Combine(dir, "att-on.cs");
+        File.WriteAllText(q, "class B {\n    int Y = 1;\n    int Z = 2;\n}\n", new UTF8Encoding(false));
+        var s = EditSession.Open(q, null);
+        s.Attention = true; // opt-in (в проде: open(path, attention:true))
+        var blind = s.ReplaceLines(2, 2, "    int Y = 10;", s.Rev, false, null, "me");
+        SelfTest.Check(blind.Blind is not null && blind.Blind.Contains("never seen"),
+            $"attention: правка вслепую предупреждает ({blind.Blind})");
+        s.MarkSeen("me", 1, 5, "show");
+        var seen = s.ReplaceLines(2, 2, "    int Y = 20;", s.Rev, false, null, "me");
+        SelfTest.Check(seen.Blind is null, "attention: просмотренный диапазон правится молча");
+        var gap = s.ReplaceLines(4, 4, "    int Z = 3;", s.Rev, false, null, "me"); // 4 внутри 1..5 — видена
+        SelfTest.Check(gap.Blind is null, "attention: интервалы покрывают внутренние строки");
+        // edit_batch: второй операция вне просмотра → предупреждение указывает edits[1]
+        var s2 = EditSession.Open(q, null);
+        s2.Attention = true;
+        s2.MarkSeen("me", 1, 2, "show");
+        var batch = s2.EditBatch([
+            new Core.BatchOp(2, 2, "    int Y = 21;", null),
+            new Core.BatchOp(4, 4, "    int Z = 3;", null),
+        ], s2.Rev, false, "me");
+        SelfTest.Check(batch.Blind is not null && batch.Blind.StartsWith("edits[1]:"),
+            $"attention: batch указывает первый невиденный операция ({batch.Blind})");
+        s2.Dispose();
+    }
+}
+
+/// <summary>v0.11 #8: parameterized edit recipes — сохранить форму, воспроизвести по якорям.</summary>
+static class V111Recipes {
+    public static void Run(string dir) {
+        var r = Recipes.Save("test-priv-readonly", "test recipe", [
+            new Recipes.Step("    private int {{name}};", "    private readonly int {{name}};"),
+        ]);
+        SelfTest.Check(r.Steps.Count == 1, "recipe: сохраняется");
+        SelfTest.Check(Recipes.CollectPlaceholders(r.Steps).SetEquals(["name"]), "recipe: плейсхолдеры собраны");
+
+        string a = Path.Combine(dir, "rec-a.cs");
+        File.WriteAllText(a, "class RA {\n    private int _x;\n}\n", new UTF8Encoding(false));
+        var (att, _) = Sessions.Attach(a, null, null);
+        var p = new Dictionary<string, string> { ["name"] = "_x" };
+        var (st, en) = Recipes.LocateUnique(att.Doc, Recipes.Resolve(r.Steps[0].Find, p), out int cnt) ?? (0, 0);
+        SelfTest.Check(cnt == 1 && st == 2 && en == 2, $"recipe: якорь найден ({cnt}, {st}..{en})");
+        var outcome = att.Doc.EditBatch([new Core.BatchOp(st, en, Recipes.Resolve(r.Steps[0].Replace, p), null)],
+            att.LastSeenRev, false, att.Id);
+        SelfTest.Check(outcome.Applied == 1 && att.Doc.GetLineText(2).Contains("readonly"), "recipe: применился по параметру");
+        att.Doc.Save(false, "keep", false, att.Id);
+        Sessions.Detach(att.Id, true);
+
+        string c = Path.Combine(dir, "rec-c.cs");
+        File.WriteAllText(c, "class RC {\n    public int Q;\n}\n", new UTF8Encoding(false));
+        var (att2, _) = Sessions.Attach(c, null, null);
+        Recipes.LocateUnique(att2.Doc, "    private int _z;", out int cnt2);
+        SelfTest.Check(cnt2 == 0, "recipe: отсутствующий якорь → 0 (дивергенция not_found)");
+        Sessions.Detach(att2.Id, true);
+
+        string d = Path.Combine(dir, "rec-d.cs");
+        File.WriteAllText(d, "var a = 1;\nvar a = 1;\n", new UTF8Encoding(false));
+        var (att3, _) = Sessions.Attach(d, null, null);
+        Recipes.LocateUnique(att3.Doc, "var a = 1;", out int cnt3);
+        SelfTest.Check(cnt3 == 2, $"recipe: два вхождения → ambiguous ({cnt3})");
+        Sessions.Detach(att3.Id, true);
+        try { File.Delete(Path.Combine(Recipes.Dir, "test-priv-readonly.json")); } catch { }
     }
 }

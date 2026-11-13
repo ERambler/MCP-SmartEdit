@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.11.0 (2026-11-13)
+
+- **Attention tracking (#5)**: `open(path, attention:true)` — opt-in. The server tracks which line ranges the editor has actually SEEN (`show` ranges, `find` snippets/spans, `goto` symbol lines); a mutation touching an unseen range carries a non-blocking `blind` warning ("lines 4..4 not seen — nearest seen: 1..2 via show (r0); show them first"). `edit_batch` names the first unseen op (`edits[1]: …`). Guards confident wrong-line edits that neither rev nor `expect_old` catch when the anchor is skipped. Seen-intervals merge per actor; cleared on external reset.
+- **Parameterized edit recipes (#8)**: `recipe_save(name, steps[{find,replace}], description?)` persists a refactor shape with `{{param}}` placeholders; `recipe_apply(name, params, paths[1..16], dry_run?, save?)` replays it by TEXT anchors — every anchor located in every file BEFORE anything applies; any divergence (`not_found`/`ambiguous`) → `recipe_diverged` naming file+step, nothing applied. Atomic per file (edit_batch), RAM-staging by default (save per file, or `save:true` best-effort — the syntax gate reports honestly per file). `recipe_list()` shows what exists. Recipes live in the data dir as JSON (name `[a-z0-9._-]{1,64}`).
+- Tools: 23 → 26 (`recipe_save`, `recipe_list`, `recipe_apply`); help() covers both features; `blind` field on mutation/batch results (null unless opted in).
+- Selftest: +11 (attention off-by-default / blind / seen-silences / interval cover / batch names edits[i]; recipe save/collect/locate/apply/diverge 0 and ambiguous) — **259 checks ALL PASS**.
+
 ## v0.10.0 (2026-11-13)
 
 - **Built-in tree-sitter syntax gate (#18, consilium 2026-11-13)**: `save` on `.cs .js .ts .tsx .py .sh` is blocked with `syntax_gate` if the edit introduced **NEW** syntax errors vs baseline — the number-one real-world failure class (agent breaks code, saves, walks away). Design per the three-voice verdict (Gemini-argon + R1 + Google):

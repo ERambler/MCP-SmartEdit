@@ -96,6 +96,7 @@ sealed class ReplaceContentTool : ITool {
             Recovered = outcome.Recovered, Intervening = outcome.Intervening?.ToArray(),
             Diagnostics = outcome.Diags?.Select(d => new DiagDto { Line = d.Line, Code = d.Code, Message = d.Message }).ToArray(),
             Unsaved = s.Dirty, // v0.9.3: применено в RAM, НЕ сохранено — не забудь save(path)
+            Blind = outcome.Blind, // #5
         }, RpcJson.Default.MutationResult);
     }
 }

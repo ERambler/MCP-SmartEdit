@@ -201,6 +201,8 @@ SMARTEDIT — GOLDEN RULES
 - expect_old = exact current text of the range — your guard against your own wrong-line math
 - stale rev auto-recovers by default (response: recovered:true + intervening) — usually you do nothing
 - v0.9.3: every edit/show response on a DIRTY document carries unsaved:true — SAVE before running external tools (git/tests/bash see the OLD disk code)
+- v0.11 #5: open(path, attention:true) tracks which lines you've SEEN (show/find/goto); editing an unseen range returns
+  a non-blocking blind warning ("lines 4..4 not seen — nearest seen: 1..2 via show; show them first") — opt-in, per document
 - errors are JSON {kind,...} — branch on kind, never parse prose; machine retry: {strategy: reissue_with_rev|reanchor|reread_range, start?, end?}
 
 TOOL MAP
@@ -214,6 +216,10 @@ edit     : replace_lines(start,end,new_text,expected_rev,expect_old?) | insert_a
           undo(n, expected_rev) — undo×2 = redo, peer-safe compensating mutations
 lifecycle: save(keeps encoding; force=true publishes peers' edits too) | close(discard?) | sessions | sync
 ops      : check(bracket audit) | log(tail/grep/errors_only — shared journal) | calc(exact math) | convert(encoding)
+recipes : recipe_save(name, steps[{find,replace}], description?) — persist a validated refactor with {{param}} placeholders;
+           recipe_apply(name, params, paths[1..16], dry_run?) replays it by TEXT anchors (unique occurrence each) —
+           phase A locates every anchor in every file BEFORE applying; divergence → recipe_diverged {file, step}, nothing applied;
+           RAM-staging (save per file, or save:true best-effort). recipe_list() shows what exists.
 gate     : save on .cs/.js/.ts/.tsx/.py/.sh is SYNTAX-GATED (v0.10, built-in tree-sitter): blocked with syntax_gate
            if YOUR edit added NEW syntax errors vs baseline (old ones never block, moved ones aren't new);
            gateErrors[] names the missing token (;/)/fi) at 1-based row:col; result carries gate: pass|forced|off|degraded

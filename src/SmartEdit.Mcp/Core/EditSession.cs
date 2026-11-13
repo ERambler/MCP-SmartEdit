@@ -6,11 +6,11 @@ using SmartEdit.Mcp.Core.SymbolScan;
 namespace SmartEdit.Mcp.Core;
 
 public sealed record FindHit(int Line, string Preview, string? Snippet, string? Where, int SpanStart = 0, int SpanEnd = 0);
-public sealed record MutationOutcome(int Rev, int TotalLines, string Diff, bool DryRun, List<string>? Brackets, bool Recovered = false, List<string>? Intervening = null, List<BracketCheck.Diag>? Diags = null);
+public sealed record MutationOutcome(int Rev, int TotalLines, string Diff, bool DryRun, List<string>? Brackets, bool Recovered = false, List<string>? Intervening = null, List<BracketCheck.Diag>? Diags = null, string? Blind = null);
 public sealed record SaveOutcome(long BytesWritten, string? BackupPath, string Hash, string Encoding,
     string GateStatus = "off", List<SyntaxGate.Diag>? GateNew = null);
 public sealed record BatchOp(int Start, int End, string NewText, string? ExpectOld);
-public sealed record BatchOutcome(int Rev, int TotalLines, int Applied, List<string> Diffs, bool DryRun, List<string>? Brackets, bool Recovered = false, List<string>? Intervening = null, List<BracketCheck.Diag>? Diags = null);
+public sealed record BatchOutcome(int Rev, int TotalLines, int Applied, List<string> Diffs, bool DryRun, List<string>? Brackets, bool Recovered = false, List<string>? Intervening = null, List<BracketCheck.Diag>? Diags = null, string? Blind = null);
 public sealed record ReplaceAllOutcome(int Rev, int TotalLines, int Occurrences, List<int> Lines, bool DryRun, List<string>? Brackets);
 
 /// <summary>Компенсирующая операция для undo: строки [Old ↔ New] на позиции Start (позиция — hint: undo ищет по содержимому).</summary>
@@ -69,6 +69,60 @@ public sealed class EditSession : IDisposable {
     ByteSource _src = null!;
     /// <summary>gate/v1 (#18): отпечатки ошибок последнего сохранённого/открытого текста; null = пересчитать лениво. check() не трогает.</summary>
     List<SyntaxGate.Diag>? _gateBaseline;
+
+    // ── #5 attention tracking: какие диапазоны РЕДАКТОР реально видел (opt-in: open(attention:true)) ──
+    /// <summary>Включён ли трекинг внимания для этого документа (свойство документа, не актора).</summary>
+    public bool Attention { get; internal set; }
+    /// <summary>actor → отсортированные слитые интервалы «видел» (start, end, rev, via).</summary>
+    readonly Dictionary<string, List<(int Start, int End, int Rev, string Via)>> _seen = new();
+
+    /// <summary>Отметить диапазон просмотренным (show/find/goto). Вызывать под Gate.</summary>
+    public void MarkSeen(string? actor, int start, int end, string via) {
+        if (!Attention || actor is null || end < start) return;
+        start = Math.Max(1, start);
+        end = Math.Min(TotalLines, end);
+        if (end < start) return;
+        var list = _seen.TryGetValue(actor, out var l) ? l : (_seen[actor] = []);
+        list.Add((start, end, Rev, via));
+        list.Sort((a, b) => a.Start != b.Start ? a.Start.CompareTo(b.Start) : a.End.CompareTo(b.End));
+        // слить пересечения/соседства; via выжившего — более свежий (ниже по списку)
+        var merged = new List<(int Start, int End, int Rev, string Via)>(list.Count);
+        foreach (var iv in list) {
+            if (merged.Count > 0 && iv.Start <= merged[^1].End + 1) {
+                var p = merged[^1];
+                merged[^1] = (p.Start, Math.Max(p.End, iv.End), Math.Max(p.Rev, iv.Rev), iv.Rev >= p.Rev ? iv.Via : p.Via);
+            }
+            else merged.Add(iv);
+        }
+        list.Clear(); list.AddRange(merged);
+    }
+
+    /// <summary>
+    /// Слепая зона правки (#5): null = диапазон полностью покрыт просмотренным; иначе текст-предупреждение
+    /// с ближайшим увиденным интервалом. Неблокирующее поле Blind в ответе правки.
+    /// </summary>
+    public string? BlindSpot(string? actor, int start, int end) {
+        if (!Attention || actor is null) return null;
+        start = Math.Max(1, start);
+        end = Math.Max(start, end);
+        if (!_seen.TryGetValue(actor, out var list) || list.Count == 0)
+            return $"lines {start}..{end} never seen this session — show(path, {Math.Max(1, start - 5)}, {end + 5}) first";
+        int cur = start;
+        (int Start, int End, int Rev, string Via)? nearest = null;
+        foreach (var iv in list) {
+            if (iv.End < cur) { nearest = iv; continue; }
+            if (iv.Start > cur) {
+                string hint = nearest is { } nb ? $" — nearest seen: {nb.Start}..{nb.End} via {nb.Via} (r{nb.Rev})" : "";
+                return $"lines {cur}..{Math.Min(end, iv.Start - 1)} not seen{hint}; show them first";
+            }
+            cur = iv.End + 1;
+            nearest = iv;
+            if (cur > end) return null;
+        }
+        var last = list[^1];
+        return cur > end ? null
+            : $"lines {cur}..{end} not seen — nearest seen: {last.Start}..{last.End} via {last.Via} (r{last.Rev}); show them first";
+    }
     long[] _baseStarts = [];
     bool _endsWithNewline;
     PieceTable _pieces = null!;
@@ -163,6 +217,7 @@ public sealed class EditSession : IDisposable {
         _symbols = null;
         _symbolsRev = -1;
         _gateBaseline = null; // gate/v1 (#18): новый документ — baseline пересчитается лениво от исходного текста
+        _seen.Clear();        // #5: внешний сброс/переоткрытие — знание строк устарело
         var fi = new FileInfo(Path);
         _diskMtimeUtc = fi.LastWriteTimeUtc;
         _diskSize = fi.Length;
@@ -425,6 +480,7 @@ public sealed class EditSession : IDisposable {
                 $"range [{start}..{end}] invalid: file has {TotalLines} lines (1-based, inclusive; end=start-1 inserts)",
                 currentRev: Rev, totalLines: TotalLines);
         if (expectOld is not null) CheckAnchor(start, end - start + 1, expectOld);
+        string? blind = BlindSpot(actor, start, Math.Max(start, end)); // #5: правка вслепую (advisory)
         var newLines = ParseLines(newText);
         var oldLines = new List<string>(end - start + 1);
         for (int i = start; i <= end; i++) oldLines.Add(GetLineText(i));
@@ -432,7 +488,7 @@ public sealed class EditSession : IDisposable {
         var after = Context(end + 1, 3);
         string diff = Differ.Unified(before, oldLines, newLines, after, start);
 
-        if (dryRun) return new MutationOutcome(Rev, TotalLines, diff, DryRun: true, Brackets: null);
+        if (dryRun) return new MutationOutcome(Rev, TotalLines, diff, DryRun: true, Brackets: null, Blind: blind);
         Apply(start - 1, end - start + 1, newLines);
         Rev++;
         Dirty = true;
@@ -443,7 +499,7 @@ public sealed class EditSession : IDisposable {
         int newEnd = start + newLines.Count; // + строка после: ловим осиротевшую закрывающую
         var diags = DiagReport(Math.Max(1, start - 1), Math.Min(TotalLines, newEnd));
         var brackets = diags?.Select(d => $"line {d.Line}: {d.Message}").ToList();
-        return new MutationOutcome(Rev, TotalLines, diff, DryRun: false, Brackets: brackets, Diags: diags);
+        return new MutationOutcome(Rev, TotalLines, diff, DryRun: false, Brackets: brackets, Diags: diags, Blind: blind);
     }
 
     public MutationOutcome InsertAfter(int line, string text, int expectedRev, bool dryRun = false, string? actor = null) {
@@ -454,6 +510,7 @@ public sealed class EditSession : IDisposable {
                 currentRev: Rev, totalLines: TotalLines);
 
         var newLines = ParseLines(text);
+        string? blind = BlindSpot(actor, line, line); // #5: точка вставки
         string diff;
         if (newLines.Count == 0) diff = "(nothing to insert: empty text)";
         else {
@@ -463,7 +520,7 @@ public sealed class EditSession : IDisposable {
             var after = Context(line + 1, 2);
             diff = Differ.Unified(before, [], newLines, after, line + 1);
         }
-        if (dryRun) return new MutationOutcome(Rev, TotalLines, diff, DryRun: true, Brackets: null);
+        if (dryRun) return new MutationOutcome(Rev, TotalLines, diff, DryRun: true, Brackets: null, Blind: blind);
         Apply(line, 0, newLines);
         Rev++;
         Dirty = true;
@@ -473,7 +530,7 @@ public sealed class EditSession : IDisposable {
             spanStart: line + 1, spanEnd: line, spanDelta: newLines.Count); // точка вставки: пустой спан
         var diags = DiagReport(Math.Max(1, line), Math.Min(TotalLines, line + newLines.Count + 1));
         var brackets = diags?.Select(d => $"line {d.Line}: {d.Message}").ToList();
-        return new MutationOutcome(Rev, TotalLines, diff, DryRun: false, Brackets: brackets, Diags: diags);
+        return new MutationOutcome(Rev, TotalLines, diff, DryRun: false, Brackets: brackets, Diags: diags, Blind: blind);
     }
 
 
@@ -537,8 +594,16 @@ public sealed class EditSession : IDisposable {
                 $"{anchorFails.Count} anchor mismatch(es) — batch NOT applied:\n" + string.Join("\n", anchorFails),
                 currentRev: Rev, totalLines: TotalLines);
 
+        // #5: первый непросмотренный операция — advisory-предупреждение в ответ
+        string? batchBlind = null;
+        if (Attention && actor is not null)
+            for (int i = 0; i < ops.Count && batchBlind is null; i++) {
+                var b = BlindSpot(actor, ops[i].Start, Math.Max(ops[i].Start, ops[i].End));
+                if (b is not null) batchBlind = $"edits[{i}]: {b}";
+            }
+
         if (dryRun)
-            return new BatchOutcome(Rev, TotalLines, plan.Length, [.. plan.Select(p => p.Diff)], DryRun: true, Brackets: null);
+            return new BatchOutcome(Rev, TotalLines, plan.Length, [.. plan.Select(p => p.Diff)], DryRun: true, Brackets: null, Blind: batchBlind);
 
         foreach (var (op, _, oldLines, newLines, _) in plan.OrderByDescending(p => p.Op.Start)) // снизу вверх
             Apply(op.Start - 1, op.End == op.Start - 1 ? 0 : op.End - op.Start + 1, newLines);
@@ -552,7 +617,7 @@ public sealed class EditSession : IDisposable {
             spanStart: first, spanEnd: last, spanDelta: delta);
         var diags = DiagReport(Math.Max(1, first - 1), Math.Min(TotalLines, last + Math.Max(delta, 0) + 4));
         var brackets = diags?.Select(d => $"line {d.Line}: {d.Message}").ToList();
-        return new BatchOutcome(Rev, TotalLines, plan.Length, [.. plan.Select(p => p.Diff)], DryRun: false, Brackets: brackets, Diags: diags);
+        return new BatchOutcome(Rev, TotalLines, plan.Length, [.. plan.Select(p => p.Diff)], DryRun: false, Brackets: brackets, Diags: diags, Blind: batchBlind);
     }
 
     /// <summary>

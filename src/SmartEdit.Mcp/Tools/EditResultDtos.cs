@@ -84,6 +84,8 @@ public sealed class MutationResult {
     public string[]? Intervening { get; set; }       // что меняли чужие правки, пока твой rev устарел
     public DiagDto[]? Diagnostics { get; set; }      // v0.8: структурные якоря (line/code/message), null = чисто
     public bool Unsaved { get; set; }                 // v0.9.3: правка применена в RAM, но НЕ сохранена — не забудь save(path)
+    /// <summary>#5 (v0.11, opt-in open(attention:true)): правка затронула строки, которых редактор не видел — advisory, не блок.</summary>
+    public string? Blind { get; set; }
 }
 
 /// <summary>Per-file итог edit_transaction (#3).</summary>
@@ -234,6 +236,7 @@ public sealed class BatchResult {
     public string[]? Intervening { get; set; }   // v0.7 (#1)
     public DiagDto[]? Diagnostics { get; set; }  // v0.8
     public bool Unsaved { get; set; }             // v0.9.3: применяется в RAM, НЕ сохранено — save(path)
+    public string? Blind { get; set; }            // #5 (v0.11): первый непросмотренный edits[i] (open(attention:true))
 }
 
 public sealed class ReplaceAllResult {
@@ -269,4 +272,52 @@ public sealed class SyncResult {
     public int TotalLines { get; set; }
     public string[] Events { get; set; } = [];
     public PeerDto[] Peers { get; set; } = [];
+}
+
+// ── v0.11 (#8): parameterized edit recipes — переиспользуемые проверенные рефакторинги ──
+
+public sealed class RecipeSaveResult {
+    public string Name { get; set; } = "";
+    public int Steps { get; set; }
+    public string[] Placeholders { get; set; } = [];   // {{param}} собранные из find/replace
+    public string Path { get; set; } = "";             // где лежит JSON рецepta
+}
+
+public sealed class RecipeDto {
+    public string Name { get; set; } = "";
+    public string Description { get; set; } = "";
+    public int Steps { get; set; }
+    public string[] Placeholders { get; set; } = [];
+}
+
+public sealed class RecipeListResult {
+    public RecipeDto[] Recipes { get; set; } = [];
+}
+
+public sealed class RecipeFileDto {
+    public string Path { get; set; } = "";
+    public int Rev { get; set; }
+    public int TotalLines { get; set; }
+    public int Applied { get; set; }
+    public List<string> Diffs { get; set; } = [];
+    public bool Unsaved { get; set; }                  // RAM-staging: save(path) когда доволен
+    public bool? SavedOk { get; set; }                 // save:true → статус (null = save не запрашивался)
+    public string? SaveError { get; set; }
+}
+
+public sealed class RecipeApplyResult {
+    public string Name { get; set; } = "";
+    public bool DryRun { get; set; }
+    public int Applied { get; set; }                   // шагов применено (0 при diverged)
+    public RecipeFileDto[] Files { get; set; } = [];
+    public int UnsavedFiles { get; set; }
+    /// <summary>Не null, когда якорь рецepta разошёлся с файлом: {file, step, reason, detail}. Ничего не применено.</summary>
+    public RecipeDivergedDto? Diverged { get; set; }
+}
+
+public sealed class RecipeDivergedDto {
+    public string File { get; set; } = "";
+    public int Step { get; set; }                      // индекс шага (0-based)
+    public string Reason { get; set; } = "";           // not_found | ambiguous | stale
+    public string Detail { get; set; } = "";
 }

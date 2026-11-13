@@ -75,8 +75,15 @@ sealed class GotoTool : ITool {
             }
         }
         Walk(result.Roots, "");
+        var shown = hits.OrderBy(h => h.Line).Take(50).ToList();
+        if (s.Attention)
+            await ToolOps.LockedAsync(s, () => {
+                foreach (var h in shown) // #5: goto привёл к символу — сам символ увиден (тело нет)
+                    s.MarkSeen(att.Id, h.Line, Math.Max(h.Line, h.EndLine), "goto");
+                return 0;
+            });
         return ToolOps.Json(new GotoResult {
-            Language = result.Language, Symbols = [.. hits.OrderBy(h => h.Line).Take(50)],
+            Language = result.Language, Symbols = [.. shown],
             Truncated = hits.Count > 50,
         }, RpcJson.Default.GotoResult);
     }
