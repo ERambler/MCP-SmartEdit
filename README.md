@@ -1,74 +1,84 @@
 # SmartEdit MCP
 
-**Line-based text editor for LLM agents.** A zero-dependency [Model Context Protocol](https://modelcontextprotocol.io) stdio server that lets coding agents edit files by **line numbers** — no byte-exact `old_string` to drift out of sync, no whole files loaded into context. Works with any MCP client: **ZCode, Claude Desktop, Cursor, Windsurf, Cline** and anything else that speaks stdio MCP.
+**A safety-first text editor for LLM coding agents.** A zero-dependency [Model Context Protocol](https://modelcontextprotocol.io) stdio server: edits by **line number** (no byte-exact `old_string` to drift), **syntax-gated saves** (broken code never hits the disk), atomic multi-edit and multi-file transactions, undo, multi-agent collaboration — all with **range reads and diff responses**, so you never pay the whole file in tokens. Works with any MCP client: **ZCode, Claude Desktop, Cursor, Windsurf, Cline**, anything that speaks stdio MCP.
 
-[![Version](https://img.shields.io/badge/version-v0.9.3-blue)](https://github.com/ERambler/MCP-SmartEdit/releases)
-[![CI](https://github.com/ERambler/MCP-SmartEdit/actions/workflows/ci.yml/badge.svg)](https://github.com/ERambler/MCP-SmartEdit/actions/workflows/ci.yml)
+[![Version](https://img.shields.io/badge/version-v0.12.0-blue)](https://github.com/ERambler/MCP-SmartEdit/releases)
+[![CI](https://img.shields.io/badge/CI-build%2Bsmoke-green)](https://github.com/ERambler/MCP-SmartEdit/actions/workflows/ci.yml)
 [![.NET](https://img.shields.io/badge/.NET-10-purple)](https://dotnet.microsoft.com/download/dotnet/10.0)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-stdio%20server-orange)](https://modelcontextprotocol.io)
-[![Selftest](https://img.shields.io/badge/selftest-237%20checks%20ALL%20PASS-brightgreen)](#verification)
+[![Selftest](https://img.shields.io/badge/selftest-284%20checks%20ALL%20PASS-brightgreen)](#verification)
+
+## The pain it kills
+
+You gave an agent a 1500-line legacy file. It reads the whole thing (**12k tokens**), edits line 4500 — wait, that's a *different* file — it re-reads, `old_string` no longer matches, retry, retry, and then it saves code that **doesn't even parse** and walks away to run tests against the wrong disk state. Three failure classes, one root cause: the built-in editor is a text replacer with no memory, no validation and no idea of *lines*.
 
 ```text
-the #1 failure mode of built-in Edit tools:
-agent recomputes the file -> old_string no longer matches -> edit rejected -> tokens burned
-
-SmartEdit: find -> show -> replace_lines(41..52, "...", expected_rev=17) -> done.
-Nothing to mismatch. Ever. And if you break a bracket doing it -
-the response itself tells you the line where the unclosed literal was OPENED.
+built-in Edit            agent recomputes the file → old_string drifts → rejected → tokens burned
+                         saves broken syntax → tests run against broken code → debug spiral
+SmartEdit                find → show → replace_lines(41..52, "...") → save → syntax_gate
+                         nothing to mismatch; broken code is REFUSED at the disk boundary
 ```
 
----
-
-## Why it exists
+## Where it beats the built-in Edit
 
 | Built-in Edit / str_replace / apply_patch | SmartEdit |
 |---|---|
-| needs byte-exact `old_string` that **drifts** after context summarization | addresses lines by **number**, one integer `rev` guard |
-| whole file in context to edit it | `show`/`find` read only what is asked; mmap up to **~2 GB UTF-8** |
-| last writer wins — silent clobbering | named-offender conflicts, provably-safe **auto-recovery**, all-or-nothing batches |
-| errors are prose | errors are **JSON** with machine `kind`, `current_rev`, `retry_hint` — even the current text of the disputed range |
-| no undo, no audit | **undo** (compensating mutations), shared cross-project **journal** every agent can read |
+| byte-exact `old_string` that **drifts** after summarization | addresses lines by **number**, one integer rev guard + optional `expect_old` anchor |
+| reads whole file to edit it | `show`/`find` read **ranges**; mmap up to ~2 GB UTF-8 |
+| response = the new file (or silence) | response = unified **diff** + bracket diagnostics + rev |
+| saves anything, including broken syntax | **syntax gate**: saves that introduce *new* parse errors are refused (`gateErrors[]` name the missing token) |
+| last writer wins — silent clobber | named-offender conflicts, provably-safe auto-recovery, `peers_dirty`, cross-process mutex |
+| no undo, no audit | **undo** (undo×2 = redo), shared journal every agent can grep |
+| one edit at a time | atomic `edit_batch` (200 edits), multi-file transactions, replayable **recipes** |
 
-## Killer features
+## Token economy — the honest version
 
-### 1. Diagnostics in every edit response — anchored, machine-readable
-Each `replace_lines` / `edit_batch` returns `diagnostics: [{line, code, message}]` built on a **universal literal-aware lexer** (C#, Python, JS/TS, Java, C/C++). It understands raw strings `"""`/`$$"""`, triple-quoted Python, JS template literals with nested `${}`, Java text blocks, C++ `R"delim(...)delim"` — so brackets **stop lying about string contents**. And when a literal is left unterminated, the anchor points at the **line where it was opened**, not where the pain is felt. Codes: `bracket_mismatch`, `never_closed`, `stray_closer`, `unterminated_literal`, `unterminated_comment`, `unterminated_hole`.
+What actually saves tokens on large files:
 
-### 2. Stale-rev auto-recovery — concurrency without the ceremony
-Someone else edited the file while your `rev` aged? `retry_on_stale` (ON by default) re-applies your edit **once, only when provably safe**: the `expect_old` anchor still matches, or the range was untouched (line shifts are tracked — the apply lands at the *shifted* coordinates). The response tells you `recovered: true` and exactly what others did meanwhile. Never blind: a semantically changed range returns a structured `stale_conflict` carrying the current text of the range plus a `retry_hint`.
+- **Range reads instead of whole-file reads**: `show(start, end, max_chars)` reads exactly the lines you edit. Editing line 4500 of a 10k-line file never pays for lines 1–4499.
+- **`find` returns edit-ready spans**: hits carry a `span {start, end}` + snippet — you edit the span directly, no follow-up `show` round-trip.
+- **`code_outline` rides along with `open`**: top-50 symbols with line numbers for files ≤5k lines — the "read the tree → read the file" ceremony collapses into one call.
+- **Diff responses**: every mutation returns a unified diff (±3 lines context), not the file.
+- **`replace_content`**: exact-text anchors, no line math → fewer failed calls, fewer re-reads.
+- **RAM staging**: edits accumulate in memory, `save` is explicit and rare — intermediate states cost zero round-trips.
 
-### 3. All-or-nothing editing
-- **`edit_batch`** — up to 200 edits in one atomic call: every range and anchor validated *before* anything applies; applied bottom-up, no shift math; one rev bump.
-- **`edit_transaction` (v0.9)** — the same guarantee across files: every step validated on every file before anything applies; one bad anchor aborts the whole transaction with `transaction_aborted` naming the file. RAM-atomic by design, `save` explicit.
-- **`replace_content` (v0.9.1)** — edit by exact text, no line numbers: the snippet must occur exactly once (`not_found` / `ambiguous_match` with the matching lines otherwise). Field-driven: line-math errors were the #1 failure in real agent sessions.
-- **`expect_old` anchors** — exact-content guard that catches the agent's own wrong-line math (rev only catches *external* drift).
-- **`undo`** — compensating mutations: new rev, peer-safe, `undo` after `undo` redoes.
-- **`undo`** — compensating mutations: new rev, peer-safe, `undo` after `undo` redoes.
+What is *not* a token feature (so we don't claim it): the piece-table/mmap engine is **memory and speed** economy (flat RAM on 300 MB files, <1 ms per call) — it makes the editor possible, it doesn't shrink your prompt.
 
-### 4. Syntax gate on save (v0.10)
-A tree-sitter engine is built into the core (no plugins, no Node, no Roslyn — grammars load lazily per language, single-digit ms) and checks `.cs .js .ts .tsx .py .sh` on every `save`: **the save is blocked with `syntax_gate` if the edit introduced NEW syntax errors**. Pre-existing errors never block (baseline absorbs them); a shifted or moved error is not "new" (fingerprints, not coordinates). `missing` diagnostics name the absent token — `;`, `)`, `fi` — with 1-based row/col. `force=true` publishes anyway and the response lists exactly what slipped through (`gate: pass|forced|off|degraded`, `gateErrors[]`). A wedged parser can't hang the server: hard per-parse budget; 3 strikes → the language's gate auto-disables until restart (`off_disabled`). Known limits (honest): Python indentation slips through; HTML is not gated (lenient by nature).
+How to verify instead of trusting us: tokens-per-task (SmartEdit vs your built-in Edit on the same change), tool-calls-to-done, and edit success rate are all measurable from the shared journal (`log` tool greps itself). We dogfood daily; **post your numbers, we'll post ours**.
 
-### 5. Structure vision, free of round-trips
-`open` on a code file (≤5k lines) returns `code_outline` — top-50 symbols with lines — no extra `symbols` call needed. `symbols`/`goto`/`tree` go deeper when asked.
+## The safety layer
 
-### 6. Multi-agent collaboration
-One shared document per file path: every editor sees one piece table and one rev. `open(path, note)` lists peers; a conflicting edit names **who** changed **what** and **when**; `save` refuses with `peers_dirty` while others have unsaved work. Idle attachments are garbage-collected after 30 minutes.
+1. **Syntax gate on `save`** (tree-sitter built in, no Node/Roslyn/plugins): `.cs .js .ts .tsx .py .sh` — a save that introduces **new** syntax errors vs baseline is refused with `syntax_gate`; pre-existing errors never block; a moved error isn't "new" (fingerprints, not coordinates); `missing ';' at 2:14` tells you exactly what to fix; `force=true` is the conscious override and still reports what slipped through.
+2. **Anchors against your own wrong math**: `expect_old` (exact current text of the range) catches miscounted lines *before* the edit applies; `ambiguous_match`/`not_found` make text anchors unambiguous.
+3. **Atomicity**: `edit_batch` — 200 edits, all validated before any apply, bottom-up (no shift math); `edit_transaction` — the same across files; `recipe_apply` — replay a saved refactor across N files with locate-all-then-apply semantics (divergence = precise report, nothing touched).
+4. **Recovery**: stale-rev auto-recovery re-applies your edit *only when provably safe* (anchor intact or range untouched, shifts tracked); otherwise a structured `stale_conflict` with the current text and a retry hint. `undo` — compensating mutations, peer-safe.
+5. **Collaboration guards**: one document per path, peers listed in `open`, conflicting edits name the offender, `peers_dirty` on save, cross-process mutex (two servers never clobber each other), a DIRTY file is OS-protected from external writes until you save.
+6. **File birth inside the gate** (v0.12): `create(path, content)` — a phantom RAM session, nothing on disk until `save`, advisory syntax check of the seed right in the response, first save gates hard.
+7. **Crash safety**: save = temp file + atomic rename (+ `.smartedit-bak`); unsaved work is shadowed to disk; encodings (cp1251/UTF-16) round-trip — `save` keeps the original encoding by default.
 
-### 7. Zero-ritual operability
-- **Path-first (v0.9)**: every session tool takes `path` directly — `show(path, 1..N) → replace_lines(path, ...) → save(path)`. `open` is optional, `expected_rev` is optional (omit = the last rev you observed). Zero preamble.
-- **`log`** — the shared journal of *all* sessions and processes (every call, every error kind, per-pid, rotated at 5 MB) the agent can grep to retrace its own steps. Test traffic is isolated to a temp dir — the journal reflects real usage only.
-- **Update check** — on startup the server asks GitHub (background, never blocks stdio); a native dialog shows the release notes; **OK installs** the update in place; **Cancel** never nags about that version again.
-- **`calc`** — exact arithmetic (hex/bin/`^`/`!`/functions); LLMs should not do mental math.
+## The 60-second tour
 
-### Also on board
-- **Crash-safe save**: `save` writes to a temp file and atomically renames (`.smartedit-bak` kept) — power loss mid-save never corrupts the original.
-- **Cross-process guard (v0.9.2)**: two SmartEdit instances never fight over a file — the second gets an explicit `cross_process_lock` at first touch (pids are in the shared journal), instead of an opaque EBUSY at save time.
-- Encoding safety (cp1251/UTF-16 open + round-trip, `convert`, save keeps the original encoding by default), `replace_all` with refuse-entirely semantics, `file_info`, `sessions` diagnostics, insert into empty files via `[1..0]`.
+```jsonc
+// path-first: no open ceremony, every tool takes path directly
+show(path: "C:\\src\\BigFile.cs", start: 41, end: 52)          // range read, numbered lines
+find(path, regex: "EditSession\\(", context: 2)                 // hits with spans → edit without re-reading
+replace_lines(path, start: 41, end: 52, new_text: "...",
+              expect_old: "...exact current text...")           // anchored, atomic
+// -> { rev: 1, diff: "@@ ...", diagnostics: [], unsaved: true } // bracket-clean proof, nag until save
+save(path)                                                       // syntax gate runs HERE
+// -> { gate: "pass" }  ...or syntax_gate with gateErrors[] if you broke something
 
-**Ships with a battle-tested agent skill** (the usage protocol that makes agents confidently prefer the right tool — hard rules, when-SmartEdit vs when-Edit, the find→show→replace loop): [skills/zcode-smartedit/SKILL.md](skills/zcode-smartedit/SKILL.md), with a guide to authoring your own: [skills/README.md](skills/README.md).
+edit_batch(path, edits: [ {start:10,end:12,new_text:"...",expect_old:"..."},
+                          {start:900,end:899,new_text:"inserted"} ])  // 200 max, all-or-nothing
+undo(path, n: 1)                                                 // compensating edit
+create(path: "C:\\src\\New.cs", content: "class N { }")          // phantom until save
+recipe_apply(name: "priv-to-readonly", params: {...}, paths: [...]) // zero-token replay, N files
+```
 
-## Performance (measured, see [Verification](#verification))
+Every error is JSON with a machine `kind` (`stale_rev`, `anchor_mismatch`, `syntax_gate`, `disk_conflict`, `peers_dirty`…) plus `current_rev` and a retry hint — branch on kinds, never parse prose.
+
+## Performance (measured on the release binary)
 
 | Operation | Result |
 |---|---|
@@ -76,13 +86,14 @@ One shared document per file path: every editor sees one piece table and one rev
 | `open` 300 MB / 4.9 M lines (parallel line index) | **1.2 s** |
 | `find` regex over 300 MB | **0.6 s** |
 | `save` 300 MB (streamed, xxHash64 on the fly) | **1.5 s** |
+| Syntax gate, typical file (tree-sitter, lazy grammars) | **0.2–30 ms** |
 | Typical tool call | **< 1 ms** server-side (ms-precision in the journal) |
 
-Memory stays flat on giants: memory-mapped base + piece-table edits; `save` streams; diagnostics stream.
+Memory stays flat on giants: memory-mapped base + piece-table edits; `save` streams.
 
 ## Install
 
-**Requirement: [.NET 10 runtime](https://dotnet.microsoft.com/download/dotnet/10.0)** — the single framework-dependent artifact (~1.4 MB exe). Windows x64 today; the code is pure BCL — `dotnet publish -r linux-x64` should work, feedback welcome.
+**Requirement: [.NET 10 runtime](https://dotnet.microsoft.com/download/dotnet/10.0)** — single framework-dependent artifact (~1.4 MB exe + 7 grammar dlls ≈ 13 MB unzipped). Windows x64 today; the code is pure BCL — `dotnet publish -r linux-x64` should work, feedback welcome.
 
 ### Option A — one-liner for agents (PowerShell)
 
@@ -95,96 +106,49 @@ Downloads the latest release to `%LOCALAPPDATA%\SmartEdit\bin`, runs the selftes
 ### Option B — manual
 
 1. Download `SmartEdit-win-x64-vX.Y.Z.zip` from [Releases](https://github.com/ERambler/MCP-SmartEdit/releases), unzip (e.g. into `%LOCALAPPDATA%\SmartEdit\bin`)
-2. Sanity check: `SmartEdit.Mcp.exe selftest` — must print `ALL PASS` (exit code 0, CI-friendly)
+2. Sanity check: `SmartEdit.Mcp.exe selftest` — must print `ALL PASS`; `SmartEdit.Mcp.exe smoke` pokes a live server (transport + every tool + misuse pack) in ~1 s
 3. Register with your MCP client (below)
 
-### ZCode (user scope) — notes from our own bruises
+### Client configs
 
-Config: `~/.zcode/cli/config.json` (create the `mcp` section if missing):
-
-```json
-{
-  "mcp": {
-    "servers": {
-      "smartedit": { "command": "C:\Users\YOU\AppData\Local\SmartEdit\bin\SmartEdit.Mcp.exe", "args": [] }
-    }
-  }
-}
+```jsonc
+// ZCode: ~/.zcode/cli/config.json          // Claude Desktop: %APPDATA%\Claude\claude_desktop_config.json
+{ "mcp": { "servers":  { "smartedit": { "command": "C:\\Users\\YOU\\AppData\\Local\\SmartEdit\\bin\\SmartEdit.Mcp.exe" } } } }
+// Cursor / Windsurf / any stdio client: same shape under mcpServers
 ```
 
-Learned the hard way:
-
-- **A skill file is NOT a server registration.** The skill only teaches *when* to call the tools; without the `mcp.servers` entry the `mcp__smartedit__*` tools never appear.
-- New server = **new chat session** (no hot reload). Restart the client or open a new conversation after editing the config.
-- The exe is **locked while a session uses it**: to upgrade, close chats / `Stop-Process -Name SmartEdit.Mcp`, overwrite, reopen — or just click OK on the update dialog, it handles this for you.
-- **Locks (v0.8.2+)**: a CLEAN session never holds its file between tool calls — git/formatters/scripts write freely. Only a DIRTY session (unsaved edits) holds the file until save/close — that's protection for the edit base, call `save` or `close(discard)` to release. If a file feels locked, `sessions` shows who.
-- Optional companion skill (usage protocol, smart vs built-in edit): copy [`skills/zcode-smartedit/SKILL.md`](skills/zcode-smartedit/SKILL.md) to `~/.zcode/skills/smartedit/SKILL.md`. **Writing your own skill for another agent/client?** Read [`skills/README.md`](skills/README.md) first — a field-tested guide on authoring skills that make agents confidently prefer the right tool.
-
-### Claude Desktop
-
-`%APPDATA%\Claude\claude_desktop_config.json`:
-
-```json
-{ "mcpServers": { "smartedit": { "command": "C:\Users\YOU\AppData\Local\SmartEdit\bin\SmartEdit.Mcp.exe" } } }
-```
-
-### Cursor / Windsurf / any stdio MCP client
-
-`~/.cursor/mcp.json` (or your client's equivalent) — same shape:
-
-```json
-{ "mcpServers": { "smartedit": { "command": "C:\Users\YOU\AppData\Local\SmartEdit\bin\SmartEdit.Mcp.exe", "args": [] } } }
-```
-
-The server speaks standard MCP (initialize / tools/list / tools/call) over stdio with **no client-specific assumptions** — if your client supports MCP stdio servers, it supports SmartEdit.
+- New server registration = **new chat session** (no hot reload). The exe is locked while a session uses it — close chats or `Stop-Process -Name SmartEdit.Mcp` before upgrading (or click OK on the built-in update dialog).
+- Optional companion skill (usage protocol: when-SmartEdit vs when-Edit, the find→show→replace loop): copy [`skills/zcode-smartedit/SKILL.md`](skills/zcode-smartedit/SKILL.md) to `~/.zcode/skills/smartedit/SKILL.md`. Authoring your own for another client? [`skills/README.md`](skills/README.md) is a field-tested guide.
 
 ### Environment variables
 
 | Variable | Effect |
 |---|---|
 | `SMARTEDIT_DATA_DIR` | data dir (default `%LOCALAPPDATA%\SmartEdit`); the shared journal `mcp.log` lives there |
-| `SMARTEDIT_LOG=debug` | verbose protocol logging (method/id/size only — tool-call payloads never enter the journal) |
-| `SMARTEDIT_TELEMETRY=off` | disable telemetry (`tool … → ok` lines); errors keep being logged — that's diagnostics, not telemetry |
-| `SMARTEDIT_NO_UPDATE_CHECK=1` | disable the startup update check (same as the `--no-update` command-line arg) |
+| `SMARTEDIT_LOG=debug` | verbose protocol logging (method/id/size only — payloads never enter the journal) |
+| `SMARTEDIT_TELEMETRY=off` | disable telemetry (`tool … → ok` lines); errors keep being logged — that's diagnostics |
+| `SMARTEDIT_NO_UPDATE_CHECK=1` | disable the startup update check |
 
-## The 60-second tour
-
-```jsonc
-// 1. open — session, rev, code outline, peers (multi-agent aware)
-open(path: "C:\\src\\BigFile.cs", note: "refactoring utils")
-// -> { sessionId: "sab12...", rev: 0, totalLines: 84213, codeOutline: [...], peers: [...] }
-
-// 2. navigate — regex with context snippets + symbol breadcrumbs
-find(sessionId, regex: "EditSession\\(", context: 2)
-
-// 3. edit — by line numbers, anchored, atomic
-replace_lines(sessionId, start: 41, end: 52, new_text: "...", expected_rev: 0,
-              expect_old: "...exact current text of lines 41..52...")
-// -> { rev: 1, diff: "...", diagnostics: [] }   // diagnostics [] = brackets clean
-//    peer raced you? recovered: true + intervening: [...] — or a structured stale_conflict
-
-// 4. many edits at once — validated before applied, no shift math, one rev bump
-edit_batch(sessionId, edits: [
-  { start: 10, end: 12, new_text: "...", expect_old: "..." },
-  { start: 900, end: 899, new_text: "inserted" }   // end=start-1 -> insertion
-], expected_rev: 1)
-
-// 5. oops — undo is a compensating edit (undo twice = redo)
-undo(sessionId, n: 1, expected_rev: 2)
-
-// 6. persist — keeps the original encoding; refuses while peers have unsaved edits
-save(sessionId)   // peers_dirty if someone else is mid-flight; force:true publishes all
-```
-
-Every mutation response carries: new `rev`, unified `diff`, structured `diagnostics` with anchors, and (in shared files) the `events` you missed. Every error is JSON with a machine-readable `kind`.
 ## Verification
 
-- `SmartEdit.Mcp.exe selftest` — 237 checks: five-language literal fixtures (raw strings, f-strings, template literals, C++ raw), diagnostics anchors, stale-recovery scenarios (anchor/untouched/shifted/hijacked), save-torture (mutation stream with byte-exact disk verification after every save), encodings, collaboration, undo, 300 MB big-file flow, full protocol round-trip, corpus fuzz (every repo .cs file must pass the bracket audit). Exit code 0/1 — used as the CI gate on every push and tag.
-- Cold-start and per-call timings measured on the release binary; per-call milliseconds are written to the shared journal so anyone can audit performance.
+- **284 selftest checks** (exit 0/1, CI gate on every push): five-language literal fixtures, anchored diagnostics, stale-recovery scenarios, save-torture (byte-exact disk verification after every save), the piece-table corruption regression, `create` semantics, encodings, collaboration, undo, 300 MB big-file flow, full protocol round-trip, corpus fuzz (every repo .cs file must pass the audit).
+- **67 live smoke checks** (~1 s, CI gate on build *and* on the published release binary): real server over stdio, every tool happy-path + edges, plus a **drunk-LLM pack** — wrong line math, ancient revs, hallucinated session ids, garbage-typed args, 50K-char edits, double-edits. The server must help, not crash.
+- Per-call milliseconds are written to the shared journal — audit performance yourself.
 
-## Changelog
+## Milestones
 
-Full history in [CHANGELOG.md](CHANGELOG.md). Recent: **v0.9.3** unsaved nag in every response + `replace_content` scope bounds + `server_version` in errors; **v0.9.2** cross-process guard + corpus fuzz; **v0.9.1** `replace_content` (edit by exact text) + honest force-hint; **v0.9** path-first API (the `open` ritual is dead) + `edit_transaction` (#3) + lexer fix; **v0.8.2** unlock-when-clean; **v0.8.1** self-documenting API (`help`); **v0.8** honest brackets + anchored diagnostics; **v0.7** stale-rev auto-recovery, telemetry hygiene, session GC.
+Brief — the full history lives in [CHANGELOG.md](CHANGELOG.md).
+
+- **v0.12** — `create()`: file birth inside the syntax gate (phantom RAM session, disk untouched until save)
+- **v0.11** — `recipe_save`/`recipe_apply` (replayable refactors, `{{param}}` anchors); attention tracking (`blind` warnings on unseen-range edits); **#19 root cause fixed** (piece-table slice reads — every path now sees the same document, locked by regression tests)
+- **v0.10** — built-in **tree-sitter syntax gate** on save (.cs/.js/.ts/.tsx/.py/.sh); live smoke suite in CI
+- **v0.9** — path-first API (the `open` ritual is dead); multi-file `edit_transaction`; cross-process mutex; `replace_content`; corpus fuzz
+- **v0.8** — honest literal-aware bracket diagnostics in every edit response; `help`; clean sessions never hold files
+- **v0.7** — stale-rev auto-recovery, save-torture lock, telemetry hygiene
+
+## Roadmap
+
+Deprecation wave in flight: 7 zero-use tools leave `tools/list` (issue #22, telemetry-driven). Next candidates: cross-platform single-file builds, a public tokens-per-edit benchmark vs built-in editors. Known limits: Python indentation slips past the gate; HTML is not gated (lenient by nature); Windows-first distribution.
 
 ## License
 
