@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using System.Diagnostics.CodeAnalysis;
 
 namespace SmartEdit.Mcp;
 
@@ -11,6 +12,7 @@ namespace SmartEdit.Mcp;
 /// Отчёт: именованные чеки, провалы с expected/got, время прогона; exit 0/1. Весь прогон &lt; 15 с.
 /// </summary>
 public static class Smoke {
+    [RequiresUnreferencedCode("smoke-клиент сериализует анонимные типы запросов рефлексией — гоняйте на framework-dependent сборке; на Native AOT Program.cs откажет заранее")]
     public static async Task<int> RunAsync() {
         try { Console.OutputEncoding = Encoding.UTF8; } catch { }
         var sw = Stopwatch.StartNew();

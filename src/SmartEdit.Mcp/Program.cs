@@ -21,6 +21,12 @@ if (args.Length > 0 && args[0] == "selftest")
 // пакет «пьяная нейронка»; <15с, отчёт с expected/got, exit 0/1
 if (args.Length > 0 && args[0] == "smoke") {
     Environment.SetEnvironmentVariable("SMARTEDIT_NO_UPDATE_CHECK", "1");
+    // AOT: smoke-клиент сериализует запросы рефлексией (анонимные типы) — без dynamic кода он не работает;
+    // честный отказ вместо падения на первом вызове; selftest на AOT гоняется полностью
+    if (!System.Runtime.CompilerServices.RuntimeFeature.IsDynamicCodeSupported) {
+        Console.WriteLine("smoke requires dynamic code (reflection JSON) — unavailable in Native AOT; run selftest instead");
+        return 2;
+    }
     return await SmartEdit.Mcp.Smoke.RunAsync();
 }
 

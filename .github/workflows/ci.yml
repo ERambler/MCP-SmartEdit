@@ -20,6 +20,25 @@ jobs:
       # #20: живые смоки запущенного сервера (транспорт + все инструменты + drunk-LLM), <15с
       - run: dotnet run -c Release --no-build --project src/SmartEdit.Mcp/SmartEdit.Mcp.csproj -- smoke
 
+  # AOT-валидация (#аудит 2026-11-14): windows-latest имеет VS C++ — собираем Native AOT и гоним
+  # selftest на нём. Главная неизвестная — tree-sitter (P/Invoke + LoadLibrary грамматик) под AOT.
+  # Не релизный артефакт (пока): гейт готовности + уверенность, что AOT-путь не сломается молча.
+  aot:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.x
+      - run: dotnet publish -c Release -r win-x64 -p:PublishAot=true -o aot src/SmartEdit.Mcp/SmartEdit.Mcp.csproj
+      - name: selftest on the AOT binary (tree-sitter gate = the real test)
+        run: aot/SmartEdit.Mcp.exe selftest
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smartedit-aot-win-x64
+          path: aot/
+          retention-days: 7
+
   # По тегу v*: publish (framework-dependent, требуется .NET 10) + zip + draft release (публикует человек)
   release:
     if: startsWith(github.ref, 'refs/tags/v')
