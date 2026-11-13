@@ -17,6 +17,13 @@ Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
 if (args.Length > 0 && args[0] == "selftest")
     return await SmartEdit.Mcp.SelfTest.RunAsync();
 
+// SmartEdit.Mcp.exe smoke → живые смоки ЗАПУЩЕННОГО сервера (#20): транспорт + все инструменты +
+// пакет «пьяная нейронка»; <15с, отчёт с expected/got, exit 0/1
+if (args.Length > 0 && args[0] == "smoke") {
+    Environment.SetEnvironmentVariable("SMARTEDIT_NO_UPDATE_CHECK", "1");
+    return await SmartEdit.Mcp.Smoke.RunAsync();
+}
+
 Log.Info($"SmartEdit MCP v{McpProtocolHandler.ServerVersion} запускается. Data dir: {AppPaths.DataRoot}");
 
 // v0.6: фоновая проверка обновлений (GitHub latest release → системный диалог); stdio не блокируется.

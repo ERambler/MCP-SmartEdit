@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.11.2 (2026-11-14)
+
+- **Live smoke suite (#20)**: `SmartEdit.Mcp.exe smoke` spawns the real server over stdio JSON-RPC and pokes every tool (happy + edges) plus a **drunk-LLM pack** (wrong line math caught by expect_old, ancient revs auto-recover, hallucinated session ids, garbage-typed args, 50K-char edits, emoji regexes, double-edits, dirty-file protection). Report names every failing check with expected/got; exit 0/1. **61 checks, 0.9s**. Wired into CI: build-test job + release job (runs on the PUBLISHED binary).
+- **CI zip fixed**: the release asset packed only the exe — without the tree-sitter grammar dlls the syntax gate silently degraded (off_no_grammar) for every installed user. Zip now includes `tree-sitter*.dll`.
+- Smoke-engine findings on the way: unread child stderr pipe deadlocks the server at 4KB (drained now); `initialize`/`tools/list` are plain-object results (checks use raw responses).
 ## v0.11.1 (2026-11-14)
 
 - **#19 CRITICAL fixed — root cause, not a band-aid**: an insert piece can reference a SLICE of its buffer (any later edit inside a previously inserted block splits the piece: head/tail pieces carry FirstLine>0). Two read paths ignored that:

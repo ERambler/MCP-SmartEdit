@@ -17,6 +17,8 @@ jobs:
           dotnet-version: 10.x
       - run: dotnet build -c Release src/SmartEdit.Mcp/SmartEdit.Mcp.csproj
       - run: dotnet run -c Release --no-build --project src/SmartEdit.Mcp/SmartEdit.Mcp.csproj -- selftest
+      # #20: живые смоки запущенного сервера (транспорт + все инструменты + drunk-LLM), <15с
+      - run: dotnet run -c Release --no-build --project src/SmartEdit.Mcp/SmartEdit.Mcp.csproj -- smoke
 
   # По тегу v*: publish (framework-dependent, требуется .NET 10) + zip + draft release (публикует человек)
   release:
@@ -33,10 +35,12 @@ jobs:
       - run: dotnet publish -c Release -r win-x64 -o win-x64/publish src/SmartEdit.Mcp/SmartEdit.Mcp.csproj
       - name: selftest gate on the release binary
         run: win-x64/publish/SmartEdit.Mcp.exe selftest
-      - name: zip asset
+      - name: smoke gate on the release binary (#20)
+        run: win-x64/publish/SmartEdit.Mcp.exe smoke
+      - name: zip asset (exe + нативные грамматики tree-sitter*.dll — без них гейт молча вырождается, #20)
         run: |
           $tag = $env:GITHUB_REF_NAME
-          Compress-Archive -Path win-x64/publish/SmartEdit.Mcp.exe -DestinationPath "win-x64/SmartEdit-win-x64-$tag.zip" -Force
+          Compress-Archive -Path win-x64/publish/SmartEdit.Mcp.exe, win-x64/publish/tree-sitter*.dll -DestinationPath "win-x64/SmartEdit-win-x64-$tag.zip" -Force
           Get-Item win-x64/*.zip
       - name: draft release with asset
         run: |
