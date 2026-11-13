@@ -55,6 +55,7 @@ public static class SelfTest {
         V091Content.Run(dir);
         V092CrossProcess.Run(dir);
         V093Nag.Run(dir);
+        V100Gate.Run(dir);
         V03Features.BatchAndAnchors(dir);
         await V03Features.StructuredErrorsAsync(dir);
         V03Features.ReplaceAllTests(dir);
@@ -1590,5 +1591,85 @@ static class V051Detect {
         var s = EditSession.Open(p, null);
         SelfTest.Check(s.TotalLines == 2 && s.GetLineText(1).EndsWith("аб"), "detect: кириллица на границе 4096 — UTF-8 распознан");
         s.Dispose();
+    }
+}
+
+/// <summary>v0.10 (#18): gate/v1 — синтаксический гейт save на встроенном tree-sitter.</summary>
+static class V100Gate {
+    public static void Run(string dir) {
+        // 1) чистая правка проходит, статус pass
+        string p = Path.Combine(dir, "gate-clean.cs");
+        File.WriteAllText(p, "class A {\n    int X = 1;\n    void M() { }\n}\n", new UTF8Encoding(false));
+        var s = EditSession.Open(p, null);
+        s.ReplaceLines(2, 2, "    int X = 2;", s.Rev, false);
+        var ok = s.Save(false, "keep", false);
+        SelfTest.Check(ok.GateStatus == "pass", $"gate: чистая правка проходит ({ok.GateStatus})");
+        s.Dispose();
+
+        // 2) новая ошибка блокирует (kind syntax_gate); force публикует со статусом forced + списком
+        string b = Path.Combine(dir, "gate-broken.cs");
+        File.WriteAllText(b, "class B {\n    int Y = 1;\n    void M() { }\n}\n", new UTF8Encoding(false));
+        var s2 = EditSession.Open(b, null);
+        s2.ReplaceLines(2, 2, "    int Y = 1", s2.Rev, false); // потеряли ';'
+        SelfTest.CheckThrows<ToolException>(() => s2.Save(false, "keep", false),
+            "gate: новая синтаксическая ошибка блокирует save", "syntax_gate");
+        var forced = s2.Save(false, "keep", true);
+        SelfTest.Check(forced.GateStatus == "forced" && forced.GateNew is { Count: > 0 },
+            $"gate: force публикует, ошибки в ответе ({forced.GateStatus}, n={forced.GateNew?.Count})");
+        SelfTest.Check(File.ReadAllText(b).Contains("int Y = 1\n"), "gate: force реально записал текст");
+        s2.Dispose();
+
+        // 3) baseline поглощает СТАРЫЕ ошибки: файл уже битый, правка чистая → проходит
+        string c = Path.Combine(dir, "gate-old.cs");
+        File.WriteAllText(c, "class C {\n    int Z = 1\n    void M() { }\n}\n", new UTF8Encoding(false)); // нет ';' в исходнике
+        var s3 = EditSession.Open(c, null);
+        s3.InsertAfter(4, "    // просто комментарий", s3.Rev, false);
+        var absorbed = s3.Save(false, "keep", false);
+        SelfTest.Check(absorbed.GateStatus == "pass" && absorbed.GateNew.Count == 0,
+            $"gate: старая ошибка в baseline не блокирует ({absorbed.GateStatus})");
+        // 4) сдвиг строк: вставка ВЫШЕ старой ошибки — тот же отпечаток, не «новая»
+        s3.InsertAfter(1, "    // сдвигаю старую ошибку вниз", s3.Rev, false);
+        var shifted = s3.Save(false, "keep", false);
+        SelfTest.Check(shifted.GateStatus == "pass",
+            $"gate: съехавшая ошибка — тот же отпечаток, не новая ({shifted.GateStatus})");
+        // 5) check не трогает baseline: после check новая ошибка всё равно блокирует
+        s3.CheckBrackets(0, 0);
+        s3.InsertAfter(6, "    int W = 2", s3.Rev, false); // НОВАЯ битая строка (нет ';')
+        SelfTest.CheckThrows<ToolException>(() => s3.Save(false, "keep", false),
+            "gate: check не съедает baseline — новая ошибка блокирует", "syntax_gate");
+        s3.Dispose();
+
+        // 6) не-код: .txt — гейт off
+        string t = Path.Combine(dir, "gate.txt");
+        File.WriteAllText(t, "это просто текст { без скобок;\n");
+        var s4 = EditSession.Open(t, null);
+        s4.InsertAfter(1, "ещё строка", s4.Rev, false);
+        var off = s4.Save(false, "keep", false);
+        SelfTest.Check(off.GateStatus == "off", $"gate: .txt — гейт не применяется ({off.GateStatus})");
+        s4.Dispose();
+
+        // 7) другие языки: js без ')' и bash без fi блокируют; python-отступ — документированное упущение
+        string js = Path.Combine(dir, "gate.js");
+        File.WriteAllText(js, "function f(a) { return a; }\n");
+        var s5 = EditSession.Open(js, null);
+        s5.ReplaceLines(1, 1, "function f(a { return a; }", s5.Rev, false);
+        SelfTest.CheckThrows<ToolException>(() => s5.Save(false, "keep", false), "gate: js без ')' блокирует", "syntax_gate");
+        s5.Dispose();
+
+        string sh = Path.Combine(dir, "gate.sh");
+        File.WriteAllText(sh, "echo hi\n");
+        var s6 = EditSession.Open(sh, null);
+        s6.ReplaceLines(1, 1, "if [ -f x ]; then echo hi", s6.Rev, false); // нет fi
+        SelfTest.CheckThrows<ToolException>(() => s6.Save(false, "keep", false), "gate: bash без fi блокирует", "syntax_gate");
+        s6.Dispose();
+
+        string py = Path.Combine(dir, "gate.py");
+        File.WriteAllText(py, "def f(a):\n    return a\n");
+        var s7 = EditSession.Open(py, null);
+        s7.ReplaceLines(2, 2, "return a", s7.Rev, false); // битый отступ — грамматика python терпит
+        var pyLimit = s7.Save(false, "keep", false);
+        SelfTest.Check(pyLimit.GateStatus == "pass",
+            $"gate: python-отступы не ловим — документированное ограничение ({pyLimit.GateStatus})");
+        s7.Dispose();
     }
 }

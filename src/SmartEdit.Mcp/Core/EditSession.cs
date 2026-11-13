@@ -7,7 +7,8 @@ namespace SmartEdit.Mcp.Core;
 
 public sealed record FindHit(int Line, string Preview, string? Snippet, string? Where, int SpanStart = 0, int SpanEnd = 0);
 public sealed record MutationOutcome(int Rev, int TotalLines, string Diff, bool DryRun, List<string>? Brackets, bool Recovered = false, List<string>? Intervening = null, List<BracketCheck.Diag>? Diags = null);
-public sealed record SaveOutcome(long BytesWritten, string? BackupPath, string Hash, string Encoding);
+public sealed record SaveOutcome(long BytesWritten, string? BackupPath, string Hash, string Encoding,
+    string GateStatus = "off", List<SyntaxGate.Diag>? GateNew = null);
 public sealed record BatchOp(int Start, int End, string NewText, string? ExpectOld);
 public sealed record BatchOutcome(int Rev, int TotalLines, int Applied, List<string> Diffs, bool DryRun, List<string>? Brackets, bool Recovered = false, List<string>? Intervening = null, List<BracketCheck.Diag>? Diags = null);
 public sealed record ReplaceAllOutcome(int Rev, int TotalLines, int Occurrences, List<int> Lines, bool DryRun, List<string>? Brackets);
@@ -66,6 +67,8 @@ public sealed class EditSession : IDisposable {
     Dictionary<Symbol, Symbol?>? _symbolsParents;
 
     ByteSource _src = null!;
+    /// <summary>gate/v1 (#18): отпечатки ошибок последнего сохранённого/открытого текста; null = пересчитать лениво. check() не трогает.</summary>
+    List<SyntaxGate.Diag>? _gateBaseline;
     long[] _baseStarts = [];
     bool _endsWithNewline;
     PieceTable _pieces = null!;
@@ -159,6 +162,7 @@ public sealed class EditSession : IDisposable {
         Usings = ScanUsings();
         _symbols = null;
         _symbolsRev = -1;
+        _gateBaseline = null; // gate/v1 (#18): новый документ — baseline пересчитается лениво от исходного текста
         var fi = new FileInfo(Path);
         _diskMtimeUtc = fi.LastWriteTimeUtc;
         _diskSize = fi.Length;
@@ -724,6 +728,37 @@ public sealed class EditSession : IDisposable {
                 "file changed on disk since open — SHOW the current range and RE-APPLY your edit on top of it; " +
                 "force=true DISCARDS the on-disk version and publishes yours (destructive)");
 
+        // ── gate/v1 (#18): синтаксический гейт. Блокируем сохранение, ДОБАВИВШЕЕ новые синтаксические
+        // ошибки; старые (baseline) никогда не блокируют. force=true пропускает блок, ошибки всё равно репортятся.
+        string gateStatus = "off";
+        var gateNew = new List<SyntaxGate.Diag>();
+        List<SyntaxGate.Diag>? gateAfter = null;
+        if (SyntaxGate.Applies(Path)) {
+            string currentText;
+            using (var ms = new MemoryStream()) { StreamContent(ms.Write); currentText = StrictUtf8.GetString(ms.ToArray()); }
+            var after = SyntaxGate.Analyze(Path, currentText);
+            gateStatus = after.Status;
+            if (after.Status == "pass") {
+                var before = _gateBaseline ?? BaselineFromSource();
+                if (before is not null) {
+                    _gateBaseline = before;
+                    gateNew = SyntaxGate.NewErrors(before, after.Errors);
+                    if (gateNew.Count > 0 && !force)
+                        throw new ToolException("syntax_gate",
+                            $"save blocked: edit introduced {gateNew.Count} NEW syntax error(s) vs baseline — fix them, "
+                            + $"or force=true to publish anyway: {string.Join("; ", gateNew.Take(5).Select(GateErrText))}",
+                            currentRev: Rev, totalLines: TotalLines);
+                }
+                gateAfter = after.Errors; // зафиксировать как новый baseline ПОСЛЕ успешной записи
+                if (gateNew.Count > 0) gateStatus = "forced";
+            }
+            else if (after.Status == "degraded" && !force)
+                throw new ToolException("syntax_gate_degraded",
+                    "syntax check did not complete within budget (timeout/crash) — retry the save, "
+                    + "or force=true to publish without the check",
+                    currentRev: Rev, totalLines: TotalLines);
+        }
+
         var enc = EncodingDetect.OutputEncoding(target);
         string temp = Path + ".smartedit-tmp";
         ulong hash;
@@ -770,10 +805,23 @@ public sealed class EditSession : IDisposable {
         TryDeleteFile(Path + ".smartedit-shadow");
 
         Dirty = false;
-        Reload(target); // rev НЕ меняется: save не перенумеровывает строки
+        Reload(target); // rev НЕ меняется: save не перенумеровывает строки (Reload→Init обнулил baseline)
+        _gateBaseline = gateAfter; // сохранённый текст — новый baseline (check() его никогда не трогает)
         ClearPendingEdits(); // все правки (включая чужие) опубликованы на диск
-        return new SaveOutcome(bytesWritten, backupPath, $"{hash:x16}", target);
+        return new SaveOutcome(bytesWritten, backupPath, $"{hash:x16}", target, gateStatus, gateNew);
     }
+
+    /// <summary>Baseline гейта от исходного (неотредактированного) текста документа — лениво при первом save.</summary>
+    List<SyntaxGate.Diag>? BaselineFromSource() {
+        var buf = new byte[BaseLength];
+        _src.Read(0, buf.AsSpan());
+        var res = SyntaxGate.Analyze(Path, StrictUtf8.GetString(buf));
+        return res.Status == "pass" ? res.Errors : null; // деградация baseline → пропускаем сравнение
+    }
+
+    static string GateErrText(SyntaxGate.Diag d) => d.Kind == "missing"
+        ? $"missing '{d.Token}' at {d.Row}:{d.Col}"
+        : $"{d.Kind} at {d.Row}:{d.Col} \"{d.Fragment}\"";
 
     void WriteShadow() {
         if (ContentLength() > ShadowLimit) return;

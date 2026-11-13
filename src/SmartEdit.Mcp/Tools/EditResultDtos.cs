@@ -119,6 +119,18 @@ public sealed class SaveResult {
     public string? BackupPath { get; set; }
     public string Hash { get; set; } = "";
     public string Encoding { get; set; } = "";
+    /// <summary>gate/v1: off|pass|forced|degraded|skipped_too_large|off_disabled|off_no_grammar. forced = сохранено с новыми ошибками через force.</summary>
+    public string Gate { get; set; } = "off";
+    public GateErrorDto[] GateErrors { get; set; } = []; // новые синтаксические ошибки (инфо при pass, список при forced)
+}
+
+/// <summary>Новая синтаксическая ошибка гейта: kind=error|missing, Row/Col 1-based.</summary>
+public sealed class GateErrorDto {
+    public string Kind { get; set; } = "";
+    public string Token { get; set; } = "";      // для missing — пропущенный токен (";", ")", "fi")
+    public int Row { get; set; }
+    public int Col { get; set; }
+    public string Fragment { get; set; } = "";   // для error — нормализованный текст фрагмента
 }
 
 public sealed class CloseResult {

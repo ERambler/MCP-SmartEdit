@@ -46,13 +46,16 @@ Someone else edited the file while your `rev` aged? `retry_on_stale` (ON by defa
 - **`undo`** — compensating mutations: new rev, peer-safe, `undo` after `undo` redoes.
 - **`undo`** — compensating mutations: new rev, peer-safe, `undo` after `undo` redoes.
 
-### 4. Structure vision, free of round-trips
+### 4. Syntax gate on save (v0.10)
+A tree-sitter engine is built into the core (no plugins, no Node, no Roslyn — grammars load lazily per language, single-digit ms) and checks `.cs .js .ts .tsx .py .sh` on every `save`: **the save is blocked with `syntax_gate` if the edit introduced NEW syntax errors**. Pre-existing errors never block (baseline absorbs them); a shifted or moved error is not "new" (fingerprints, not coordinates). `missing` diagnostics name the absent token — `;`, `)`, `fi` — with 1-based row/col. `force=true` publishes anyway and the response lists exactly what slipped through (`gate: pass|forced|off|degraded`, `gateErrors[]`). A wedged parser can't hang the server: hard per-parse budget; 3 strikes → the language's gate auto-disables until restart (`off_disabled`). Known limits (honest): Python indentation slips through; HTML is not gated (lenient by nature).
+
+### 5. Structure vision, free of round-trips
 `open` on a code file (≤5k lines) returns `code_outline` — top-50 symbols with lines — no extra `symbols` call needed. `symbols`/`goto`/`tree` go deeper when asked.
 
-### 5. Multi-agent collaboration
+### 6. Multi-agent collaboration
 One shared document per file path: every editor sees one piece table and one rev. `open(path, note)` lists peers; a conflicting edit names **who** changed **what** and **when**; `save` refuses with `peers_dirty` while others have unsaved work. Idle attachments are garbage-collected after 30 minutes.
 
-### 6. Zero-ritual operability
+### 7. Zero-ritual operability
 - **Path-first (v0.9)**: every session tool takes `path` directly — `show(path, 1..N) → replace_lines(path, ...) → save(path)`. `open` is optional, `expected_rev` is optional (omit = the last rev you observed). Zero preamble.
 - **`log`** — the shared journal of *all* sessions and processes (every call, every error kind, per-pid, rotated at 5 MB) the agent can grep to retrace its own steps. Test traffic is isolated to a temp dir — the journal reflects real usage only.
 - **Update check** — on startup the server asks GitHub (background, never blocks stdio); a native dialog shows the release notes; **OK installs** the update in place; **Cancel** never nags about that version again.

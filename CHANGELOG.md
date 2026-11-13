@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.10.0 (2026-11-13)
+
+- **Built-in tree-sitter syntax gate (#18, consilium 2026-11-13)**: `save` on `.cs .js .ts .tsx .py .sh` is blocked with `syntax_gate` if the edit introduced **NEW** syntax errors vs baseline — the number-one real-world failure class (agent breaks code, saves, walks away). Design per the three-voice verdict (Gemini-argon + R1 + Google):
+  - **Fingerprint-matched baseline, not coordinates**: pre-existing errors never block; a shifted/moved error is not "new". Baseline = text at open (lazily, on first gated save), refreshed to the saved text after every successful save; `check` never touches it; external-change reset rebuilds it.
+  - **`missing` diagnostics name the absent token** (`;`, `)`, `fi`) — 1-based row/col, `gateErrors[]` in every save result (`gate: pass|forced|off|degraded|skipped_too_large|off_disabled|off_no_grammar`).
+  - **Degradation is explicit, never silent**: parse budget 1.5 s; timeout/crash → `syntax_gate_degraded` block with the `force` escape hatch (a silent pass would be a hole — R1's verdict); 3 consecutive strikes auto-disable that language's gate until restart.
+  - **Engine**: [TreeSitter.DotNet](https://www.nuget.org/packages/TreeSitter.DotNet) (MIT), grammars load lazily per language (~ms; first gated save pays once). Signal = collected ERROR/MISSING nodes; root `HasError` is ignored — the C# grammar flags phantom error-states on valid collection-initializer constructs (corpus finding). No plugins, no Node, no Roslyn; nothing is downloaded at runtime.
+  - **Honest limits**: Python indentation errors slip through (grammar-tolerant); HTML not gated (lenient by nature); cascade errors (fixing a brace "uncovers" older ones) may block — `force` is the documented escape.
+- **Distribution**: publish pruned from ~590 MB of all-platform grammars to win-x64 + 7 grammars ≈ **13 MB** (exe + `tree-sitter*.dll` set). The library is a NuGet dependency — nothing vendored into the repo.
+- Selftest: +12 gate checks (clean pass, block, force-publish, baseline absorb, line-shift non-flake, `check` doesn't eat baseline, `.txt` off, js/bash gated, python limit documented) — **248 checks ALL PASS** (also green from the published binary).
 
 ## v0.9.3 (2026-11-13)
 

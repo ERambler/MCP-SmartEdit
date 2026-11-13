@@ -53,6 +53,10 @@ and auto-recovery if a peer raced you.
 - **`force=true` DISCARDS the on-disk version** (`disk_conflict`/`peers_dirty`). Default: `show` the range and
   re-apply on top of what's there.
 - New chat/session → `show`/`find` FIRST (the rev chain starts fresh).
+- **`save` on code files is syntax-gated (v0.10)**: `.cs .js .ts .tsx .py .sh` — blocked with `syntax_gate`
+  if YOUR edit introduced NEW syntax errors (old ones never block; moved ones aren't "new").
+  `missing` errors name the absent token (`;`, `)`, `fi`) at 1-based row/col. Fix them; `force=true`
+  only when the block is wrong (cascade/`#if`) — the response lists `gateErrors` either way.
 
 ## Semantics (critical)
 

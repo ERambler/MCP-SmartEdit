@@ -18,4 +18,32 @@
     <DebugType>embedded</DebugType>
     <TieredPGO>true</TieredPGO>
   </PropertyGroup>
+  <ItemGroup>
+    <!-- gate/v1 (#18): tree-sitter — синтаксический гейт save. Пакет тащит 28 грамматик × 9 платформ
+         (~590МБ в publish); PruneTreeSitterGrammars ниже режет до win-x64 + наш набор (~11МБ). -->
+    <PackageReference Include="TreeSitter.DotNet" Version="1.3.0" />
+  </ItemGroup>
+  <Target Name="PruneTreeSitterGrammars" AfterTargets="Publish">
+    <ItemGroup>
+      <!-- single-file publish расплющивает нативы в корень; обычный — держит в runtimes\<rid>\native -->
+      <TsNative Include="$(PublishDir)tree-sitter-*.dll;$(PublishDir)runtimes\**\*.dll;$(PublishDir)runtimes\**\*.so;$(PublishDir)runtimes\**\*.dylib" />
+      <TsNative Remove="$(PublishDir)tree-sitter.dll" />
+      <TsNative Remove="$(PublishDir)tree-sitter-c-sharp.dll" />
+      <TsNative Remove="$(PublishDir)tree-sitter-javascript.dll" />
+      <TsNative Remove="$(PublishDir)tree-sitter-typescript.dll" />
+      <TsNative Remove="$(PublishDir)tree-sitter-tsx.dll" />
+      <TsNative Remove="$(PublishDir)tree-sitter-python.dll" />
+      <TsNative Remove="$(PublishDir)tree-sitter-bash.dll" />
+      <TsNative Remove="$(PublishDir)runtimes\win-x64\native\tree-sitter.dll" />
+      <TsNative Remove="$(PublishDir)runtimes\win-x64\native\tree-sitter-c-sharp.dll" />
+      <TsNative Remove="$(PublishDir)runtimes\win-x64\native\tree-sitter-javascript.dll" />
+      <TsNative Remove="$(PublishDir)runtimes\win-x64\native\tree-sitter-typescript.dll" />
+      <TsNative Remove="$(PublishDir)runtimes\win-x64\native\tree-sitter-tsx.dll" />
+      <TsNative Remove="$(PublishDir)runtimes\win-x64\native\tree-sitter-python.dll" />
+      <TsNative Remove="$(PublishDir)runtimes\win-x64\native\tree-sitter-bash.dll" />
+    </ItemGroup>
+    <Delete Files="@(TsNative)" />
+    <!-- опустевшие папки чужих RID (linux/osx/win-x86/win-arm64) убрать -->
+    <RemoveDir Directories="$(PublishDir)runtimes\linux-arm;$(PublishDir)runtimes\linux-arm64;$(PublishDir)runtimes\linux-x64;$(PublishDir)runtimes\linux-x86;$(PublishDir)runtimes\osx-arm64;$(PublishDir)runtimes\osx-x64;$(PublishDir)runtimes\win-arm64;$(PublishDir)runtimes\win-x86" />
+  </Target>
 </Project>

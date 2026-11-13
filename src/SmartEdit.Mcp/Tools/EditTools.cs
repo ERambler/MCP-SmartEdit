@@ -376,7 +376,9 @@ sealed class SaveTool : ITool {
     public string Name => "save";
     public string Description =>
         "Write edits to disk: atomic temp+rename, .smartedit-bak backup (backup=true), rejects if the file changed on disk since open; force=true DISCARDS the on-disk version (prefer show + re-apply). " +
-        "encoding: 'keep' (default — original encoding/BOM preserved) or 'utf8' (no BOM, converts). Session stays open; rev does NOT change (save does not renumber lines).";
+        "encoding: 'keep' (default — original encoding/BOM preserved) or 'utf8' (no BOM, converts). Session stays open; rev does NOT change (save does not renumber lines). " +
+        "gate/v1 (.cs/.js/.ts/.tsx/.py/.sh): BLOCKED with kind syntax_gate if the edit introduced NEW syntax errors vs baseline (old errors never block); fix them or force=true. " +
+        "Result carries gate status + new errors (kind error|missing, 1-based row/col; missing names the absent token).";
     public string InputSchemaJson => """
         {"type":"object","properties":{
           "session_id":{"type":"string","description":"from a previous response; optional if path given"},"path":{"type":"string","description":"open-by-path: skip open entirely"},
@@ -395,6 +397,10 @@ sealed class SaveTool : ITool {
         var outcome = await ToolOps.LockedAsync(s, () => s.Save(backup, encoding, force, att.Id));
         return ToolOps.Json(new SaveResult {
             BytesWritten = outcome.BytesWritten, BackupPath = outcome.BackupPath, Hash = outcome.Hash, Encoding = outcome.Encoding,
+            Gate = outcome.GateStatus,
+            GateErrors = (outcome.GateNew ?? []).Select(d => new GateErrorDto {
+                Kind = d.Kind, Token = d.Token, Row = d.Row, Col = d.Col, Fragment = d.Fragment,
+            }).ToArray(),
         }, RpcJson.Default.SaveResult);
     }
 }
