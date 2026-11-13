@@ -214,6 +214,9 @@ edit     : replace_lines(start,end,new_text,expected_rev,expect_old?) | insert_a
           undo(n, expected_rev) — undo×2 = redo, peer-safe compensating mutations
 lifecycle: save(keeps encoding; force=true publishes peers' edits too) | close(discard?) | sessions | sync
 ops      : check(bracket audit) | log(tail/grep/errors_only — shared journal) | calc(exact math) | convert(encoding)
+gate     : save on .cs/.js/.ts/.tsx/.py/.sh is SYNTAX-GATED (v0.10, built-in tree-sitter): blocked with syntax_gate
+           if YOUR edit added NEW syntax errors vs baseline (old ones never block, moved ones aren't new);
+           gateErrors[] names the missing token (;/)/fi) at 1-based row:col; result carries gate: pass|forced|off|degraded
 
 ERROR KINDS → ACTION
 stale_rev        → already auto-retried (see recovered/intervening); if you passed retry_on_stale:false → re-issue with current_rev
@@ -226,6 +229,9 @@ cross_process_lock→ ANOTHER SmartEdit process owns this file (two servers over
 disk_conflict    → file changed on disk since open: SHOW the range and RE-APPLY on top; force=true DISCARDS the on-disk version
 not_found / ambiguous_match (replace_content) → copy the snippet exactly from a fresh show/find / extend it to be unique
 too_large        → over a cap: split the work
+syntax_gate      → your edit added NEW syntax errors (gateErrors[] lists them, missing names the token): FIX them;
+                   force=true only if the block is wrong (cascade/#if) — it publishes and still reports gateErrors
+syntax_gate_degraded→ checker timed out/crashed (never hangs the server): retry, or force=true to save unchecked
 diagnostics (in every edit response): [{line, code, message}] — bracket_mismatch, never_closed, stray_closer,
 unterminated_literal/comment/hole; unterminated_literal anchors the OPENING line. [] = clean.
 
