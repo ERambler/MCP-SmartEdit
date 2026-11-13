@@ -40,7 +40,7 @@ jobs:
       - name: zip asset (exe + нативные грамматики tree-sitter*.dll — без них гейт молча вырождается, #20)
         run: |
           $tag = $env:GITHUB_REF_NAME
-          Compress-Archive -Path win-x64/publish/SmartEdit.Mcp.exe, win-x64/publish/tree-sitter*.dll -DestinationPath "win-x64/SmartEdit-win-x64-$tag.zip" -Force
+          Compress-Archive -Path win-x64/publish/* -DestinationPath "win-x64/SmartEdit-win-x64-$tag.zip" -Force
           Get-Item win-x64/*.zip
       - name: draft release with asset
         run: |
