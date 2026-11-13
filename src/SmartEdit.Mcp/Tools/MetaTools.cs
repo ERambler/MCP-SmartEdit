@@ -207,6 +207,9 @@ SMARTEDIT — GOLDEN RULES
 
 TOOL MAP
 navigate : open(path, note?) → sessionId, rev, code_outline(≤5k-line code, +total/truncated), peers | show(start,end,max_chars?)
+          create(path, content?, create_parents?) — NEW file as a RAM session (#21): nothing on disk until save; advisory
+          syntax check of the seed in the response; FIRST save gates hard (fix in RAM, save once; force = conscious);
+          existing file/session → already_exists; create_parents=true makes dirs at save
           find(regex, context:N) → lines+snippets+breadcrumbs+span{start,end} (edit the span, no follow-up show) | symbols / goto / tree | file_info
 edit     : replace_lines(start,end,new_text,expected_rev,expect_old?) | insert_after(line,text,expected_rev)
           edit_batch(edits≤200, atomic, bottom-up = no shift math) | replace_all(literal, refuse-if-too-many)

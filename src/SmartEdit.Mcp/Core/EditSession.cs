@@ -137,11 +137,58 @@ public sealed class EditSession : IDisposable {
     // ── открытие / перезагрузка ──────────────────────────────────────────────
 
     public static EditSession Open(string path, string? encodingOverride) {
-        if (!File.Exists(path)) throw new FileNotFoundException("file not found: " + path);
+        if (!File.Exists(path))
+            throw new FileNotFoundException("file not found: " + path + " — create(path, content?) makes a new file (RAM until save)");
         var s = new EditSession(System.IO.Path.GetFullPath(path)); // Path — ещё и свойство класса
         s.Init(encodingOverride);
         s.AcquireFileMutex(); // v0.9.2 (#16): после успешного открытия — межпроцессный лок (не течёт при ошибке Init)
         return s;
+    }
+
+    // ── #21: рождение файла ВНУТРИ SmartEdit — фантомная RAM-сессия; диск трогает только save ──
+
+    /// <summary>Файл ещё не существует на диске: сессия создана через create(), первый save его материализует.</summary>
+    public bool IsNewFile { get; private set; }
+    bool _createParents;   // create_parents:true — недостающие папки создаются при save (не в create)
+
+    /// <summary>
+    /// #21 (консилиум 2026-11-14): create(path, content) — пустая/сеяная RAM-сессия поверх несуществующего
+    /// файла. Существующий файл → already_exists (не скрытый truncate). Дельта-гейт на первом save:
+    /// baseline пустой → все синтаксические ошибки новые (жёсткий блок, force — осознанный путь).
+    /// </summary>
+    public static EditSession CreateNew(string path, string content, bool createParents) {
+        if (string.IsNullOrWhiteSpace(path)) throw new ToolException("invalid_args", "path cannot be empty");
+        if (content.Contains('\0')) throw new ToolException("invalid_args", "content contains NUL bytes — text editor, binary is out of scope");
+        var full = System.IO.Path.GetFullPath(path);
+        if (Directory.Exists(full)) throw new ToolException("invalid_args", $"path is a directory: {full}");
+        if (File.Exists(full)) throw new ToolException("already_exists",
+            $"file already exists: {full} — open(path) to edit it (create never truncates)");
+        var s = new EditSession(full);
+        s.InitNew(content);
+        s._createParents = createParents;
+        s.AcquireFileMutex(); // межпроцессный лок работает и на несуществующий файл (named mutex по пути)
+        return s;
+    }
+
+    void InitNew(string content) {
+        _src = new MemorySource([]);            // пустая база; сеяные строки — вставка [1..0]
+        BaseLength = 0;
+        Bytes = 0;
+        _baseStarts = [];
+        Crlf = false;
+        _endsWithNewline = true;                 // новые файлы завершаются переводом (InsertBuffers.Build его пишет)
+        _pieces = new PieceTable(0);
+        _inserts = [];
+        (Outline, TodoCount) = ([], 0);
+        Usings = [];
+        _symbols = null; _symbolsRev = -1;
+        _gateBaseline = null; _seen.Clear();
+        _diskMtimeUtc = DateTime.MinValue; _diskSize = -1; // никогда не совпадёт с реальным файлом
+        IsNewFile = true;
+        Dirty = true;                             // рождён грязным: shadow-страховка + #14-семантика
+        var seed = ParseLines(content);
+        if (seed.Count > 0) Apply(0, 0, seed);
+        WriteShadow();
     }
 
     // ── v0.9.2 (#16): межпроцессная координация — named mutex на канонический путь документа.
@@ -808,11 +855,28 @@ public sealed class EditSession : IDisposable {
             _ => throw new ArgumentException($"encoding must be 'keep' (default) or 'utf8' (got '{encoding}')"),
         };
 
-        var fi = new FileInfo(Path);
-        if ((fi.LastWriteTimeUtc != _diskMtimeUtc || fi.Length != _diskSize) && !force)
-            throw new ToolException(ToolException.DiskConflict,
-                "file changed on disk since open — SHOW the current range and RE-APPLY your edit on top of it; " +
-                "force=true DISCARDS the on-disk version and publishes yours (destructive)");
+        if (IsNewFile) {
+            // #21: первый save фантома. Появился чужой файл → конфликт (не clobber); папок нет →
+            // create_parents создаёт при save (диск трогает только save), иначе ошибка с подсказкой
+            if (File.Exists(Path) && !force)
+                throw new ToolException("create_conflict",
+                    "file appeared on disk AFTER create — open it and merge manually; " +
+                    "force=true overwrites it (destructive)", currentRev: Rev, totalLines: TotalLines);
+            var parent = System.IO.Path.GetDirectoryName(Path);
+            if (!string.IsNullOrEmpty(parent) && !Directory.Exists(parent)) {
+                if (_createParents) Directory.CreateDirectory(parent!);
+                else throw new ToolException("parent_missing",
+                    $"parent directory does not exist: {parent} — pass create_parents=true to create it on save",
+                    currentRev: Rev, totalLines: TotalLines);
+            }
+        }
+        else {
+            var fi = new FileInfo(Path);
+            if ((fi.LastWriteTimeUtc != _diskMtimeUtc || fi.Length != _diskSize) && !force)
+                throw new ToolException(ToolException.DiskConflict,
+                    "file changed on disk since open — SHOW the current range and RE-APPLY your edit on top of it; " +
+                    "force=true DISCARDS the on-disk version and publishes yours (destructive)");
+        }
 
         // ── gate/v1 (#18): синтаксический гейт. Блокируем сохранение, ДОБАВИВШЕЕ новые синтаксические
         // ошибки; старые (baseline) никогда не блокируют. force=true пропускает блок, ошибки всё равно репортятся.
@@ -891,6 +955,7 @@ public sealed class EditSession : IDisposable {
         TryDeleteFile(Path + ".smartedit-shadow");
 
         Dirty = false;
+        IsNewFile = false; // #21: фантом материализован — дальше обычная жизнь файла
         Reload(target); // rev НЕ меняется: save не перенумеровывает строки (Reload→Init обнулил baseline)
         _gateBaseline = gateAfter; // сохранённый текст — новый baseline (check() его никогда не трогает)
         ClearPendingEdits(); // все правки (включая чужие) опубликованы на диск
@@ -946,6 +1011,9 @@ public sealed class EditSession : IDisposable {
     /// </summary>
     internal void EnsureLive() {
         if (!_sourceReleased) return;
+        // #21: фантомная сессия жива в RAM — файл на диске не обязан существовать;
+        // внешнее «появление» файла ловится на save (create_conflict), не здесь
+        if (IsNewFile) { _sourceReleased = false; return; }
         _sourceReleased = false;
         var fi = new FileInfo(Path);
         if (!fi.Exists)

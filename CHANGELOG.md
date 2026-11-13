@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.12.0 (2026-11-14)
+
+- **`create` (#21, consilium 2026-11-14)**: file birth INSIDE SmartEdit — `create(path, content?, create_parents?, attention?)` opens a phantom RAM session over a not-yet-existing path; **nothing touches disk until `save`** (shadow insurance included). The syntax gate finally attends the birth of code:
+  - advisory parse of the seed right in the create response (`gate: new_errors` + `gateErrors[]` — instant feedback, non-blocking);
+  - the FIRST save gates hard (empty baseline = every syntax error is NEW; fix in RAM, save once; `force=true` is the conscious override) — the consilium kept the gate strict (R1's verdict);
+  - existing file or live session on the path → `already_exists` (create never truncates); file appearing between create and save → `create_conflict` (no clobber; force overwrites);
+  - missing parent dirs → `parent_missing` with a hint, or `create_parents:true` (dirs created at save — disk-philosophy preserved); new files are UTF-8 no BOM; NUL bytes and >2MB seeds rejected; cross-process mutex covers phantom paths too.
+  - Rejected by the consilium: BASIC-style `open` modes (write/append bypass the gate and break RAM-staging), implicit auto-create in edits (garbage files from path typos), a separate append tool (`insert_after(totalLines)` exists).
+- Fix: PieceTable with a zero-line base (create's empty phantom) no longer emits a phantom base piece (IndexOutOfRange in BasePieceSpan).
+- `open` on a missing file now hints `create(path, content?)`.
+- Tools: 26 → 27; help() covers create; smoke +6 checks (phantom/already_exists/broken-seed advisory + first-save block). **284 selftest checks ALL PASS, 67 smoke checks 0.9s**.
 ## v0.11.2 (2026-11-14)
 
 - **Live smoke suite (#20)**: `SmartEdit.Mcp.exe smoke` spawns the real server over stdio JSON-RPC and pokes every tool (happy + edges) plus a **drunk-LLM pack** (wrong line math caught by expect_old, ancient revs auto-recover, hallucinated session ids, garbage-typed args, 50K-char edits, emoji regexes, double-edits, dirty-file protection). Report names every failing check with expected/got; exit 0/1. **61 checks, 0.9s**. Wired into CI: build-test job + release job (runs on the PUBLISHED binary).

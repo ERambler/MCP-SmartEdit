@@ -16,6 +16,7 @@ public static class EditToolsRegistration {
         tools.Register(new InsertAfterTool());
         tools.Register(new SaveTool());
         tools.Register(new CloseTool());
+        tools.Register(new CreateTool());       // #21 (v0.12)
         tools.Register(new RecipeSaveTool());   // #8 (v0.11)
         tools.Register(new RecipeListTool());
         tools.Register(new RecipeApplyTool());
@@ -79,6 +80,56 @@ static class ToolOps {
         catch (ArgumentException ex) {
             throw new ArgumentException($"invalid regex: {ex.Message}");
         }
+    }
+}
+
+/// <summary>#21 (консилиум 2026-11-14): рождение файла внутри SmartEdit — RAM до save, гейт участвует.</summary>
+sealed class CreateTool : ITool {
+    public string Name => "create";
+    public string Description =>
+        "Create a NEW file as a RAM session (nothing touches disk until save). content seeds it (multi-line, ≤2MB, optional). " +
+        "Existing file or live session on the path → already_exists (create never truncates). Advisory syntax check of the seed is in the response; " +
+        "the FIRST save gates hard (empty baseline = every syntax error is NEW; fix in RAM, save once — force=true is the conscious override). " +
+        "create_parents:true creates missing directories at save. New files: UTF-8 no BOM, LF.";
+    public string InputSchemaJson => """
+        {"type":"object","properties":{
+          "path":{"type":"string","description":"absolute path of the NEW file"},
+          "content":{"type":"string","description":"seed content (multi-line, default empty)"},
+          "create_parents":{"type":"boolean","description":"default false; true = create missing parent directories at save"},
+          "note":{"type":"string","description":"presence annotation for peers"},
+          "attention":{"type":"boolean","description":"#5 opt-in seen-tracking for the new document"}
+        },"required":["path"]}
+        """;
+
+    public Task<string> ExecuteAsync(JsonElement args, CancellationToken ct) {
+        string path = args.GetString("path", "");
+        if (path.Length == 0) throw new ToolException(ToolException.InvalidArgs, "path is required");
+        string content = args.GetString("content", "");
+        if (content.Length > (2 << 20))
+            throw new ToolException(ToolException.InvalidArgs, $"content is {content.Length / 1024}KB — cap 2MB per create; seed empty and build via edit_batch");
+        bool createParents = args.GetBool("create_parents");
+        var (att, _) = Sessions.Create(path, content, createParents, args.GetNullableString("note"));
+        var s = att.Doc;
+        if (args.GetBool("attention")) s.Attention = true; // #5
+
+        // advisory-парс сеяного контента (#21): мгновенная обратная связь, НЕ блок
+        string advisory = "off";
+        GateErrorDto[] advisoryErrors = [];
+        if (content.Length > 0 && SyntaxGate.Applies(s.Path)) {
+            var res = SyntaxGate.Analyze(s.Path, content);
+            if (res.Status == "pass" && res.Errors.Count > 0) {
+                advisory = "new_errors";
+                advisoryErrors = [.. res.Errors.Take(10).Select(d => new GateErrorDto {
+                    Kind = d.Kind, Token = d.Token, Row = d.Row, Col = d.Col, Fragment = d.Fragment })];
+            }
+            else advisory = res.Status;
+        }
+        return Task.FromResult(ToolOps.Json(new CreateResult {
+            SessionId = att.Id, Path = s.Path, Rev = s.Rev, TotalLines = s.TotalLines,
+            SeededLines = s.TotalLines, Created = true,
+            Gate = advisory, GateErrors = advisoryErrors,
+            Unsaved = true, // диск не тронут: save(path) материализует файл
+        }, RpcJson.Default.CreateResult));
     }
 }
 

@@ -95,7 +95,7 @@ public static class Smoke {
             Console.WriteLine("A. protocol");
             var init = await Call("initialize", new Dictionary<string, object?> { ["clientInfo"] = new { name = "smoke" } });
             var initRaw = init.ToString();
-            Check("init: version в ответе", initRaw.Contains("0.11"), initRaw[..Math.Min(80, initRaw.Length)]);
+            Check("init: version в ответе", initRaw.Contains(McpProtocolHandler.ServerVersion), initRaw[..Math.Min(80, initRaw.Length)]);
             var list = await Call("tools/list");
             var toolsRaw = list.ToString();
             Check("tools/list: 26 инструментов", toolsRaw.Split("\"name\"").Length - 1 >= 26, toolsRaw[..Math.Min(60, toolsRaw.Length)]);
@@ -203,6 +203,19 @@ public static class Smoke {
             Check("recipe_apply: missing_params называет их", ErrKind(r) == "missing_params" && ErrText(r).Contains("n"), ErrKind(r) ?? "");
             r = await Tool("recipe_list", new { });
             Check("recipe_list: показывает", ResultText(r).Contains("smoke-r"));
+
+            // create (#21): рождение файла внутри SmartEdit — диск трогает только save
+            r = await Tool("create", new { path = P("born.cs"), content = "class Born {\n    int Z = 1;\n}\n" });
+            Check("create: фантом с сидом, advisory чист", ResultText(r).Contains("\"created\":true") && ResultText(r).Contains("\"gate\":\"pass\""), ResultText(r));
+            Check("create: диск не тронут до save", !File.Exists(P("born.cs")));
+            r = await Tool("save", new { path = P("born.cs") });
+            Check("create: save материализует", ResultText(r).Contains("\"gate\":\"pass\"") && File.Exists(P("born.cs")));
+            r = await Tool("create", new { path = P("born.cs"), content = "x" });
+            Check("create: повторный → already_exists", ErrKind(r) == "already_exists", ErrKind(r) ?? "");
+            r = await Tool("create", new { path = P("broken.cs"), content = "class B {\n    int Y = 1\n}" });
+            Check("create: битый сид → advisory new_errors", ResultText(r).Contains("\"gate\":\"new_errors\"") && ResultText(r).Contains("gateErrors"), ResultText(r));
+            r = await Tool("save", new { path = P("broken.cs") });
+            Check("create: первый save блокирует битый файл", ErrKind(r) == "syntax_gate" && !File.Exists(P("broken.cs")));
 
             // ── C. пьяная нейронка ────────────────────────────────────────────
             Console.WriteLine("C. drunk LLM");

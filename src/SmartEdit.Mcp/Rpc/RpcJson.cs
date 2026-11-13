@@ -25,6 +25,7 @@ namespace SmartEdit.Mcp.Rpc;
 [JsonSerializable(typeof(Tools.TransactionResult))]
 [JsonSerializable(typeof(Tools.SaveResult))]
 [JsonSerializable(typeof(Tools.GateErrorDto))]
+[JsonSerializable(typeof(Tools.CreateResult))]
 [JsonSerializable(typeof(Tools.RecipeSaveResult))]
 [JsonSerializable(typeof(Tools.RecipeListResult))]
 [JsonSerializable(typeof(Tools.RecipeApplyResult))]

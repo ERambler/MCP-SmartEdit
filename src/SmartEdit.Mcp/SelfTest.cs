@@ -59,6 +59,7 @@ public static class SelfTest {
         V110Attention.Run(dir);
         V111Recipes.Run(dir);
         V112Incident.Run(dir);
+        V113Create.Run(dir);
         V03Features.BatchAndAnchors(dir);
         await V03Features.StructuredErrorsAsync(dir);
         V03Features.ReplaceAllTests(dir);
@@ -295,7 +296,7 @@ public static class SelfTest {
         SelfTest.Check(err is null && res!.Value.GetProperty("serverInfo").GetProperty("name").GetString() == "smartedit", "proto: initialize");
 
         (res, err) = await h.HandleAsync(new RpcRequest { Method = "tools/list", Id = J("2") });
-        SelfTest.Check(err is null && res!.Value.GetProperty("tools").GetArrayLength() == 26, "proto: 26 инструментов (v0.11: +recipe_save/list/apply)");
+        SelfTest.Check(err is null && res!.Value.GetProperty("tools").GetArrayLength() == 27, "proto: 27 инструментов (v0.12: +create)");
 
         string p = Path.Combine(dir, "proto.txt");
         File.WriteAllText(p, "1\n2\n3\n");
@@ -1823,5 +1824,72 @@ static class V112Incident {
         SelfTest.Check(s2.TotalLines == expected3.Length && s2.GetLineText(16).Contains("рецепта"),
             "#19: повторное открытие видит тот же документ (без дублей)");
         s2.Dispose();
+    }
+}
+
+/// <summary>v0.12 #21: create — рождение файла внутри SmartEdit (RAM до save, гейт на первом save).</summary>
+static class V113Create {
+    public static void Run(string dir) {
+        // 1) create пустой → save → файл материализован бит-в-бит; повторное открытие видит его
+        string p = Path.Combine(dir, "new-a.cs");
+        var s = EditSession.CreateNew(p, "", createParents: false);
+        SelfTest.Check(s.IsNewFile && s.TotalLines == 0 && !File.Exists(p), "create: пустой фантом, диск не тронут");
+        s.InsertAfter(0, "class N {", s.Rev, false, "me");
+        s.InsertAfter(1, "    int X = 1;", s.Rev, false, "me");
+        s.InsertAfter(2, "}", s.Rev, false, "me");
+        SelfTest.Check(!File.Exists(p), "create: правки живут в RAM, файла всё ещё нет");
+        s.Save(false, "keep", false, "me");
+        SelfTest.Check(File.Exists(p) && File.ReadAllText(p) == "class N {\n    int X = 1;\n}\n",
+            "create: save материализовал файл бит-в-бит");
+        SelfTest.Check(!s.IsNewFile && !s.Dirty, "create: после save — обычная жизнь файла");
+        s.Dispose();
+        var s2 = EditSession.Open(p, null);
+        SelfTest.Check(s2.TotalLines == 3 && s2.GetLineText(1) == "class N {", "create: повторное открытие видит файл");
+        s2.Dispose();
+
+        // 2) create с сеяным content + advisory нельзя проверить на уровне ядра (инструмент); битый seed → первый save блокирует
+        string b = Path.Combine(dir, "new-b.cs");
+        var s3 = EditSession.CreateNew(b, "class B {\n    int Y = 1\n}", false);
+        SelfTest.Check(s3.TotalLines == 3 && s3.GetLineText(2).Contains("int Y = 1"), "create: seed засеян");
+        SelfTest.CheckThrows<ToolException>(() => s3.Save(false, "keep", false, "me"),
+            "create: первый save блокирует битый seed (baseline пустой = все ошибки новые)", "syntax_gate");
+        SelfTest.Check(!File.Exists(b), "create: блок не породил файл");
+        s3.ReplaceLines(2, 2, "    int Y = 1;", s3.Rev, false, null, "me");
+        s3.Save(false, "keep", false, "me");
+        SelfTest.Check(File.Exists(b) && File.ReadAllText(b).Contains("int Y = 1;"), "create: чиним в RAM — save проходит");
+        s3.Dispose();
+
+        // 3) существующий файл → already_exists (не скрытый truncate)
+        SelfTest.CheckThrows<ToolException>(() => EditSession.CreateNew(b, "x", false),
+            "create: существующий файл → already_exists", "already_exists");
+
+        // 4) файл появился между create и save → create_conflict (не clobber)
+        string c = Path.Combine(dir, "new-c.cs");
+        var s4 = EditSession.CreateNew(c, "mine\n", false);
+        File.WriteAllText(c, "foreign\n"); // чужой файл появился
+        SelfTest.CheckThrows<ToolException>(() => s4.Save(false, "keep", false, "me"),
+            "create: появление файла → create_conflict", "create_conflict");
+        SelfTest.Check(File.ReadAllText(c) == "foreign\n", "create: чужой файл не затёрт");
+        s4.Save(false, "keep", true, "me"); // force — осознанный путь
+        SelfTest.Check(File.ReadAllText(c) == "mine\n", "create: force публикует поверх");
+        s4.Dispose();
+
+        // 5) родительские папки: без флага → parent_missing; с флагом → создаются при save
+        string d1 = Path.Combine(dir, "deep1", "x", "n.cs");
+        var s5 = EditSession.CreateNew(d1, "class Ok1 { }\n", createParents: false);
+        SelfTest.CheckThrows<ToolException>(() => s5.Save(false, "keep", false, "me"),
+            "create: без папок и флага → parent_missing", "parent_missing");
+        s5.Dispose();
+        string d2 = Path.Combine(dir, "deep2", "x", "n.cs");
+        var s6 = EditSession.CreateNew(d2, "class Ok2 { }\n", createParents: true);
+        s6.Save(false, "keep", false, "me");
+        SelfTest.Check(File.Exists(d2), "create: create_parents материализует папки при save");
+        s6.Dispose();
+
+        // 6) края: пустой path, директория, NUL-байты
+        SelfTest.CheckThrows<ToolException>(() => EditSession.CreateNew("   ", "x", false), "create: пустой path отклонён", "invalid_args");
+        SelfTest.CheckThrows<ToolException>(() => EditSession.CreateNew(dir, "x", false), "create: директория отклонена", "invalid_args");
+        SelfTest.CheckThrows<ToolException>(() => EditSession.CreateNew(Path.Combine(dir, "nul.cs"), "a\0b", false),
+            "create: NUL-байты отклонены", "invalid_args");
     }
 }

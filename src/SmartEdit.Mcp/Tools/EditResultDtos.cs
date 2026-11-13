@@ -274,6 +274,20 @@ public sealed class SyncResult {
     public PeerDto[] Peers { get; set; } = [];
 }
 
+/// <summary>#21 (v0.12): рождение файла — RAM-сессия, диск трогает только save.</summary>
+public sealed class CreateResult {
+    public string SessionId { get; set; } = "";
+    public string Path { get; set; } = "";
+    public int Rev { get; set; }
+    public int TotalLines { get; set; }
+    public int SeededLines { get; set; }
+    public bool Created { get; set; }
+    /// <summary>Advisory-парс сеяного content: off | pass | new_errors (+gateErrors[]) | degraded…</summary>
+    public string Gate { get; set; } = "off";
+    public GateErrorDto[] GateErrors { get; set; } = [];
+    public bool Unsaved { get; set; } = true;   // save(path) материализует файл (первый save — жёсткий гейт)
+}
+
 // ── v0.11 (#8): parameterized edit recipes — переиспользуемые проверенные рефакторинги ──
 
 public sealed class RecipeSaveResult {

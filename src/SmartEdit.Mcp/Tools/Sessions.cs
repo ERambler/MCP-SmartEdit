@@ -30,6 +30,27 @@ static class Sessions {
     const int MaxSessions = 32;
 
     /// <summary>Подключиться к документу пути (переиспользовать существующий или открыть новый).</summary>
+    /// <summary>#21: создать фантомную сессию нового файла (RAM до save); путь должен быть свободен.</summary>
+    public static (Attachment Att, bool Reused) Create(string path, string content, bool createParents, string? note) {
+        lock (Map) {
+            PruneStale();
+            if (Map.Count >= MaxSessions)
+                throw new ToolException(ToolException.InvalidArgs, $"{MaxSessions} sessions already open — close one");
+            string canonical = System.IO.Path.GetFullPath(path);
+            if (ByPath.TryGetValue(canonical, out var doc)) {
+                // сессия на этом пути уже жива (в т.ч. фантомная) — повторный create это ошибка уже-существует
+                throw new ToolException("already_exists",
+                    $"a session for this path already exists (rev {doc.Rev}{(doc.IsNewFile ? ", created-not-yet-saved" : "")}) — " +
+                    "continue editing it or close it first");
+            }
+            var s = EditSession.CreateNew(path, content, createParents);
+            ByPath[s.Path] = s;
+            var first = new Attachment { Id = "s" + Guid.NewGuid().ToString("N")[..8], Doc = s, Note = note, LastSeenRev = 0 };
+            Map[first.Id] = first;
+            return (first, false);
+        }
+    }
+
     public static (Attachment Att, bool Reused) Attach(string path, string? encoding, string? note) {
         lock (Map) {
             PruneStale(); // #12: GC брошенных подключений до проверки лимита — живой сервер не копит мусор

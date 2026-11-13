@@ -14,7 +14,9 @@ public sealed record Piece(int BufferIndex, int FirstLine, int LineCount);
 /// Кусков всегда O(числа правок) — отображение строки на кусок линейным сканом дёшево.
 /// </summary>
 public sealed class PieceTable(int baseLineCount) {
-    List<Piece> _pieces = [new(-1, 0, baseLineCount)];
+    // #21: нулевая база (create нового файла) = НИ ОДНОГО куска; кусок(-1,0,0) давал
+    // IndexOutOfRange в BasePieceSpan по пустому _baseStarts
+    List<Piece> _pieces = baseLineCount > 0 ? [new(-1, 0, baseLineCount)] : [];
     public IReadOnlyList<Piece> Pieces => _pieces;
     public int LineCount { get; private set; } = baseLineCount;
 
