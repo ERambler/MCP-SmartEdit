@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.11.1 (2026-11-14)
+
+- **#19 CRITICAL fixed — root cause, not a band-aid**: an insert piece can reference a SLICE of its buffer (any later edit inside a previously inserted block splits the piece: head/tail pieces carry FirstLine>0). Two read paths ignored that:
+  - `GetLineText` read `SpanOf(buffer, inPiece)` without `p.FirstLine` → after a split, view/anchors/locator saw WRONG buffer lines (the "show displays text not in the file" anomaly, and the interleaved view);
+  - `StreamContent`/`ContentLength` dumped the WHOLE buffer per piece → save wrote duplicated content to disk (the 369-vs-322 incident).
+  Fix: piece-aware spans everywhere (`FirstLine + inPiece` for reads; `InsertPieceSpan` slice for stream/length) — the invariant "every read path sees the same logical document" now holds by construction. Repro'd by a minimal dump (piece `FirstLine=4` returning buffer lines 0-1), locked by 7 selftest checks (view per-line, disk == view CHARACTER-EXACT after replace_all inside an insert, BytesWritten/ContentLength == real file size, re-open identity) — **266 checks ALL PASS**.
+- Added `PiecesDebug` diagnostic accessor.
+
 ## v0.11.0 (2026-11-13)
 
 - **Attention tracking (#5)**: `open(path, attention:true)` — opt-in. The server tracks which line ranges the editor has actually SEEN (`show` ranges, `find` snippets/spans, `goto` symbol lines); a mutation touching an unseen range carries a non-blocking `blind` warning ("lines 4..4 not seen — nearest seen: 1..2 via show (r0); show them first"). `edit_batch` names the first unseen op (`edits[1]: …`). Guards confident wrong-line edits that neither rev nor `expect_old` catch when the anchor is skipped. Seen-intervals merge per actor; cleared on external reset.

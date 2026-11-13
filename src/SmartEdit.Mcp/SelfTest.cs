@@ -58,6 +58,7 @@ public static class SelfTest {
         V100Gate.Run(dir);
         V110Attention.Run(dir);
         V111Recipes.Run(dir);
+        V112Incident.Run(dir);
         V03Features.BatchAndAnchors(dir);
         await V03Features.StructuredErrorsAsync(dir);
         V03Features.ReplaceAllTests(dir);
@@ -1747,5 +1748,80 @@ static class V111Recipes {
         SelfTest.Check(cnt3 == 2, $"recipe: два вхождения → ambiguous ({cnt3})");
         Sessions.Detach(att3.Id, true);
         try { File.Delete(Path.Combine(Recipes.Dir, "test-priv-readonly.json")); } catch { }
+    }
+}
+
+/// <summary>
+/// #19 (v0.11.1): regression-замок на корневую причину — вставной кусок, разрезанный правкой
+/// внутри вставки (replace_all/edit_batch по строкам РАНЕЕ вставленного блока), должен читаться
+/// одинаково ВСЕМИ путями: GetLineText (view/якоря), StreamContent (save/диск), ContentLength.
+/// До фикса StreamContent лил буфер вставки ЦЕЛИКОМ на каждый кусок → дубли на диске (369 vs 322).
+/// </summary>
+static class V112Incident {
+    public static void Run(string dir) {
+        string p = Path.Combine(dir, "inc19.cs");
+        File.WriteAllText(p,
+            "namespace T;\n\npublic sealed class MutationResult {\n    public int Rev { get; set; }\n}\n\n" +
+            "public sealed class SyncResult {\n    public string[] Events { get; set; } = [];\n    public PeerDto[] Peers { get; set; } = [];\n}\n",
+            new UTF8Encoding(false));
+        var s = EditSession.Open(p, null);
+        string View() => string.Join("\n", Enumerable.Range(1, s.TotalLines).Select(s.GetLineText)) + "\n";
+
+        // шаг 1: правка базовой части (поле добавляется ЗАМЕНОЙ 4..5)
+        s.ReplaceLines(4, 5, "    public string? Blind { get; set; }\n}", s.Rev, false);
+        string[] head = [
+            "namespace T;", "",
+            "public sealed class MutationResult {",
+            "    public string? Blind { get; set; }",
+            "}", "",
+            "public sealed class SyncResult {",
+        ];
+        SelfTest.Check(s.TotalLines == 10 && s.GetLineText(4).Contains("Blind"), $"#19: базовая правка чиста (lines={s.TotalLines})");
+
+        // шаг 2: append блока через replace хвоста (события) — большой ВСТАВНОЙ кусок
+        string[] block = [
+            "    public string[] Events { get; set; } = [];",
+            "    public PeerDto[] Peers { get; set; } = [];",
+            "}",
+            "", "// ── v0.11: recipes ──", "",
+            "public sealed class RecipeSaveResult {",
+            "    public string Name { get; set; } = \"\";",
+            "    public string Path { get; set; } = \"\";   // где лежит JSON рецepta",
+            "}", "",
+            "public sealed class RecipeDto {",
+            "    public string Name { get; set; } = \"\";",
+            "}", "",
+            "public sealed class RecipeApplyResult {",
+            "    /// <summary>рецepta summary</summary>",
+            "    public string Applied { get; set; }",
+            "}",
+        ];
+        s.ReplaceLines(8, 10, string.Join("\n", block), s.Rev, false);
+        var expected = head.Concat(block).ToArray();
+        SelfTest.Check(s.TotalLines == expected.Length && Enumerable.Range(1, s.TotalLines).All(i => s.GetLineText(i) == expected[i - 1]),
+            $"#19: view после вставки построчно верен (lines={s.TotalLines})");
+
+        // шаг 3: replace_all СТРОК внутри вставки → кусок разрезается (head+новый+tail того же буфера)
+        var m = s.ReplaceAll("рецepta", "рецепта", 200, s.Rev, false);
+        var expected3 = expected.Select(l => l.Replace("рецepta", "рецепта")).ToArray();
+        int badLine = Enumerable.Range(1, s.TotalLines).FirstOrDefault(i => s.GetLineText(i) != expected3[i - 1]);
+        string badGot = badLine > 0 && badLine <= s.TotalLines ? s.GetLineText(badLine) : "";
+        string badWant = badLine > 0 && badLine <= expected3.Length ? expected3[badLine - 1] : "";
+        SelfTest.Check(m.Occurrences == 2 && s.TotalLines == expected3.Length && badLine == 0,
+            $"#19: replace_all внутри вставки — view верен (occ={m.Occurrences}, firstBad={badLine}: got '{badGot}' want '{badWant}')");
+
+        // ГЛАВНЫЙ инвариант: диск == view (до фикса диск получал дубли: 369 vs 322 в инциденте)
+        var save = s.Save(false, "keep", false, "repro");
+        string disk = File.ReadAllText(p).Replace("\r\n", "\n");
+        SelfTest.Check(disk == View(), $"#19: disk == view ПОСИМВОЛЬНО (lines={s.TotalLines}, было расхождение +N дублей)");
+        SelfTest.Check(save.BytesWritten == new FileInfo(p).Length, "#19: BytesWritten == фактический размер файла");
+        SelfTest.Check(s.Bytes == new FileInfo(p).Length, $"#19: ContentLength == размер файла ({s.Bytes})");
+
+        // сценарий инцидента целиком: правка → вставка → replace_all → save → RE-OPEN: документ идентичен
+        s.Dispose();
+        var s2 = EditSession.Open(p, null);
+        SelfTest.Check(s2.TotalLines == expected3.Length && s2.GetLineText(16).Contains("рецепта"),
+            "#19: повторное открытие видит тот же документ (без дублей)");
+        s2.Dispose();
     }
 }

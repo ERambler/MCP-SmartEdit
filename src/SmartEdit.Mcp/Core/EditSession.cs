@@ -327,11 +327,16 @@ public sealed class EditSession : IDisposable {
         finally { ArrayPool<byte>.Shared.Return(buf); }
     }
 
+    /// <summary>Диагностический доступ к кускам (#19): [bufferIndex:перваяСтрока×строк] — для дамповых проверок.</summary>
+    public IReadOnlyList<Piece> PiecesDebug => _pieces.Pieces;
+
     public string GetLineText(int logicalLine) {
         var (p, inPiece) = _pieces.MapLine(logicalLine - 1);
         if (p.BufferIndex < 0) return BaseLineText(p.FirstLine + inPiece);
         var buf = _inserts[p.BufferIndex];
-        var (s, l) = InsertBuffers.SpanOf(buf, inPiece, Crlf ? 2 : 1);
+        // #19: кусок ссылается на строки [FirstLine, FirstLine+LineCount) СВОЕГО буфера — вставка,
+        // разрезанная позднейшей правкой, имеет FirstLine>0. Без сдвига читались чужие строки буфера.
+        var (s, l) = InsertBuffers.SpanOf(buf, p.FirstLine + inPiece, Crlf ? 2 : 1);
         return Encoding.UTF8.GetString(buf.Data, s, l);
     }
 
@@ -738,9 +743,21 @@ public sealed class EditSession : IDisposable {
                 var (a, b) = BasePieceSpan(p);
                 total += b - a;
             }
-            else total += _inserts[p.BufferIndex].Data.LongLength;
+            else { var (ia, ib) = InsertPieceSpan(p); total += ib - ia; } // #19: срез куска, не весь буфер
         }
         return total;
+    }
+
+    /// <summary>
+    /// #19: байтовый срез вставного КУСКА — строки [FirstLine, FirstLine+LineCount) его буфера.
+    /// Кусок может ссылаться на ЧАСТЬ буфера (вставка разрезана последующей правкой range-inside-insert):
+    /// лить буфер целиком на каждый кусок нельзя — на диске окажутся дубли (найдено репро issue #19).
+    /// </summary>
+    (long Start, long End) InsertPieceSpan(Piece p) {
+        var b = _inserts[p.BufferIndex];
+        long a = b.Starts[p.FirstLine];
+        long e = p.FirstLine + p.LineCount < b.Starts.Length ? b.Starts[p.FirstLine + p.LineCount] : b.Data.Length;
+        return (a, e);
     }
 
     (long Start, long End) BasePieceSpan(Piece p) {
@@ -768,7 +785,11 @@ public sealed class EditSession : IDisposable {
                 if (pi < pieces.Count - 1 && b == BaseLength && !_endsWithNewline)
                     sink(Crlf ? "\r\n"u8 : "\n"u8);
             }
-            else sink(_inserts[p.BufferIndex].Data);
+            else {
+                // #19: кусок льёт СВОЙ срез буфера; перевод строки встроен в каждую строку вставки (Build)
+                var (ia, ib) = InsertPieceSpan(p);
+                sink(_inserts[p.BufferIndex].Data.AsSpan((int)ia, (int)(ib - ia)));
+            }
         }
     }
 
