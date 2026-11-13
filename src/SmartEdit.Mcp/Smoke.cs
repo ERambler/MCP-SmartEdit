@@ -95,7 +95,7 @@ public static class Smoke {
             Console.WriteLine("A. protocol");
             var init = await Call("initialize", new Dictionary<string, object?> { ["clientInfo"] = new { name = "smoke" } });
             var initRaw = init.ToString();
-            Check("init: version в ответе", initRaw.Contains(McpProtocolHandler.ServerVersion), initRaw[..Math.Min(80, initRaw.Length)]);
+            Check("init: version в ответе", initRaw.Contains(Rpc.McpProtocolHandler.ServerVersion), initRaw[..Math.Min(80, initRaw.Length)]);
             var list = await Call("tools/list");
             var toolsRaw = list.ToString();
             Check("tools/list: 26 инструментов", toolsRaw.Split("\"name\"").Length - 1 >= 26, toolsRaw[..Math.Min(60, toolsRaw.Length)]);
