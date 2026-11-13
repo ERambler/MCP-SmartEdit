@@ -30,7 +30,8 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.x
-      - run: dotnet publish -c Release -r win-x64 -p:PublishAot=true -o aot src/SmartEdit.Mcp/SmartEdit.Mcp.csproj
+      # csproj держит fd-политику (SelfContained=false) — для AOT переопределяем свойствами командной строки
+      - run: dotnet publish -c Release -r win-x64 -p:PublishAot=true -p:SelfContained=true -p:PublishSingleFile=false -p:PublishReadyToRun=false -o aot src/SmartEdit.Mcp/SmartEdit.Mcp.csproj
       - name: selftest on the AOT binary (tree-sitter gate = the real test)
         run: aot/SmartEdit.Mcp.exe selftest
       - uses: actions/upload-artifact@v4
