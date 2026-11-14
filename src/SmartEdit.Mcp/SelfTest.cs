@@ -1212,7 +1212,7 @@ static class V082Lock {
             File.WriteAllText(b, "external-write" + nl); // POSIX: запись проходит
             string? conflict = null;
             try { _ = tools.CallAsync("save", JsonDocument.Parse($$"""{"session_id":"{{sidB}}"}""").RootElement.Clone(), default).GetAwaiter().GetResult(); }
-            catch (Tools.ToolException tex) { conflict = tex.Kind; }
+            catch (Core.ToolException texL) { conflict = texL.Kind; }
             SelfTest.CheckPublic(conflict == ToolException.DiskConflict,
                 $"lock: POSIX-защита базы = mtime-детект (save после внешней записи → disk_conflict, got {conflict})");
         }
