@@ -1215,6 +1215,9 @@ static class V082Lock {
             catch (Core.ToolException texL) { conflict = texL.Kind; }
             SelfTest.CheckPublic(conflict == ToolException.DiskConflict,
                 $"lock: POSIX-защита базы = mtime-детект (save после внешней записи → disk_conflict, got {conflict})");
+            // dirty-сессия держит базу и на POSIX (между вызовами) — force-save публикует поверх,
+            // сессия становится чистой и отпущенной (эквивалент Windows-ветки после save)
+            _ = tools.CallAsync("save", JsonDocument.Parse($$"""{"session_id":"{{sidB}}","force":true}""").RootElement.Clone(), default).GetAwaiter().GetResult();
         }
 
         // (c) Прозрачный сброс: внешняя замена → следующий tool-вызов видит НОВОЕ содержимое, rev 0
