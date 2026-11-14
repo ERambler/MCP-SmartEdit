@@ -1196,13 +1196,26 @@ static class V082Lock {
         var rb = tools.CallAsync("open", JsonDocument.Parse($$"""{"path":"{{b.Replace("\\", "\\\\")}}"}""").RootElement.Clone(), default).GetAwaiter().GetResult();
         var sidB = JsonSerializer.Deserialize<OpenResult>(rb, RpcJson.Default.OpenResult)!.SessionId;
         _ = tools.CallAsync("replace_lines", JsonDocument.Parse($$"""{"session_id":"{{sidB}}","start":1,"end":1,"new_text":"EDIT","expected_rev":0}""").RootElement.Clone(), default).GetAwaiter().GetResult();
-        bool dirtyHeld = false;
-        try { File.WriteAllText(b, "must-fail" + nl); } catch (IOException) { dirtyHeld = true; }
-        SelfTest.CheckPublic(dirtyHeld, "lock: dirty-сессия держит файл (защита базы piece-table)");
-        _ = tools.CallAsync("save", JsonDocument.Parse($$"""{"session_id":"{{sidB}}"}""").RootElement.Clone(), default).GetAwaiter().GetResult();
-        bool afterSave = true;
-        try { File.WriteAllText(b, "after-save-ok" + nl); } catch (IOException) { afterSave = false; }
-        SelfTest.CheckPublic(afterSave, "lock: save отпускает файл");
+        // Платформенная правда (поймано Ubuntu-CI 2026-11-14): Windows-mmap ЛОЧИТ файл —
+        // внешняя запись поверх dirty падает (OS-защита базы). POSIX-mmap НЕ лочит — там защита
+        // базы = mtime-детект: внешняя запись проходит, но save обязан ответить disk_conflict.
+        if (OperatingSystem.IsWindows()) {
+            bool dirtyHeld = false;
+            try { File.WriteAllText(b, "must-fail" + nl); } catch (IOException) { dirtyHeld = true; }
+            SelfTest.CheckPublic(dirtyHeld, "lock: dirty-сессия держит файл (защита базы, OS-lock)");
+            _ = tools.CallAsync("save", JsonDocument.Parse($$"""{"session_id":"{{sidB}}"}""").RootElement.Clone(), default).GetAwaiter().GetResult();
+            bool afterSave = true;
+            try { File.WriteAllText(b, "after-save-ok" + nl); } catch (IOException) { afterSave = false; }
+            SelfTest.CheckPublic(afterSave, "lock: save отпускает файл");
+        }
+        else {
+            File.WriteAllText(b, "external-write" + nl); // POSIX: запись проходит
+            string? conflict = null;
+            try { _ = tools.CallAsync("save", JsonDocument.Parse($$"""{"session_id":"{{sidB}}"}""").RootElement.Clone(), default).GetAwaiter().GetResult(); }
+            catch (Tools.ToolException tex) { conflict = tex.Kind; }
+            SelfTest.CheckPublic(conflict == ToolException.DiskConflict,
+                $"lock: POSIX-защита базы = mtime-детект (save после внешней записи → disk_conflict, got {conflict})");
+        }
 
         // (c) Прозрачный сброс: внешняя замена → следующий tool-вызов видит НОВОЕ содержимое, rev 0
         File.WriteAllText(b, "FRESH" + nl);
