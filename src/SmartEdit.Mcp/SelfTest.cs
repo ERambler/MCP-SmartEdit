@@ -296,7 +296,7 @@ public static class SelfTest {
         SelfTest.Check(err is null && res!.Value.GetProperty("serverInfo").GetProperty("name").GetString() == "smartedit", "proto: initialize");
 
         (res, err) = await h.HandleAsync(new RpcRequest { Method = "tools/list", Id = J("2") });
-        SelfTest.Check(err is null && res!.Value.GetProperty("tools").GetArrayLength() == 27, "proto: 27 инструментов (v0.12: +create)");
+        SelfTest.Check(err is null && res!.Value.GetProperty("tools").GetArrayLength() == 20, "proto: 20 инструментов (7 скрыты #22)");
 
         string p = Path.Combine(dir, "proto.txt");
         File.WriteAllText(p, "1\n2\n3\n");
@@ -353,6 +353,16 @@ public static class SelfTest {
     internal static void Check(bool cond, string name) {
         Console.WriteLine((cond ? "  PASS: " : "  FAIL: ") + name);
         if (!cond) _failed++;
+    }
+
+    internal static string Unwrapped(string json) {
+        try {
+            using var d = System.Text.Json.JsonDocument.Parse(json);
+            if (d.RootElement.TryGetProperty("result", out var r) && d.RootElement.TryGetProperty("deprecated", out _))
+                return r.GetRawText();
+        }
+        catch { }
+        return json;
     }
 
     internal static void CheckThrows<TEx>(Action a, string name, string? contains = null) where TEx : Exception {
@@ -585,9 +595,11 @@ static class V02Features {
             "tree: относительные пути + строки");
     }
 
+    /// <summary>#22: скрытые инструменты отвечают обёрткой {deprecated,note,result} — тестам нужен result.</summary>
+
     static string txt(ToolRegistry tools, string name, string argsJson) {
         var el = JsonDocument.Parse(argsJson).RootElement.Clone();
-        return tools.CallAsync(name, el, default).GetAwaiter().GetResult();
+        return SelfTest.Unwrapped(tools.CallAsync(name, el, default).GetAwaiter().GetResult());
     }
 
     static T Json<T>(string payload, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> ti)
@@ -723,7 +735,7 @@ static class V04Features {
             $"collab: stale_rev называет виновника ({mutErr?.Kind})");
         var show = Call(tools, "show", $$"""{"session_id":"{{o2.SessionId}}","start":1,"end":3}""", RpcJson.Default.ShowResult);
         SelfTest.CheckPublic(show.Events is { Length: > 0 } && show.Events[0].Contains(o1.SessionId), "collab: show доносит события с last_seen");
-        var sync = Call(tools, "sync", $$"""{"session_id":"{{o2.SessionId}}"}""", RpcJson.Default.SyncResult);
+        var sync = JsonSerializer.Deserialize<SyncResult>(SelfTest.Unwrapped(tools.CallAsync("sync", JsonDocument.Parse($$"""{"session_id":"{{o2.SessionId}}"}""").RootElement.Clone(), default).GetAwaiter().GetResult()), RpcJson.Default.SyncResult)!;
         SelfTest.CheckPublic(sync.Peers.Length == 2 && sync.Events.Length == 0, "collab: sync — peers=2, события уже доставлены");
 
         // save у второго при несохранённых правках первого → peers_dirty; force публикует всё
@@ -1288,7 +1300,7 @@ static class V090PathTxn {
             "txn: all-or-nothing — ни один файл не тронут");
 
         // (c) happy path: 3 файла + save:true → per-file статус и диск
-        string txRaw = tools.CallAsync("edit_transaction", JsonDocument.Parse($$"""{"steps":[{"path":"{{J(t1)}}","edits":[{"start":1,"end":1,"new_text":"ONE"}]},{"path":"{{J(t2)}}","edits":[{"start":1,"end":1,"new_text":"TWO"}]},{"path":"{{J(t3)}}","edits":[{"start":1,"end":1,"new_text":"THREE","expect_old":"three"}]}],"save":true}""").RootElement.Clone(), default).GetAwaiter().GetResult();
+        string txRaw = SelfTest.Unwrapped(tools.CallAsync("edit_transaction", JsonDocument.Parse($$"""{"steps":[{"path":"{{J(t1)}}","edits":[{"start":1,"end":1,"new_text":"ONE"}]},{"path":"{{J(t2)}}","edits":[{"start":1,"end":1,"new_text":"TWO"}]},{"path":"{{J(t3)}}","edits":[{"start":1,"end":1,"new_text":"THREE","expect_old":"three"}]}],"save":true}""").RootElement.Clone(), default).GetAwaiter().GetResult());
         var tx = JsonSerializer.Deserialize<TransactionResult>(txRaw, RpcJson.Default.TransactionResult)!;
         SelfTest.CheckPublic(tx.Applied == 3 && tx.Files.Count == 3 && tx.Files.All(f => f.SavedOk == true), "txn: 3 правки в 3 файлах, save ok");
         SelfTest.CheckPublic(File.ReadAllText(t1).StartsWith("ONE") && File.ReadAllText(t3).StartsWith("THREE"), "txn: диск соответствует применённому");
@@ -1307,7 +1319,7 @@ static class V090PathTxn {
         catch (ToolException t) { guard = t; }
         SelfTest.CheckPublic(guard is not null && guard.Kind == ToolException.InvalidArgs && guard.Message.Contains("reason"), "txn: >8 файлов требует reason");
         sb.Insert(sb.Length - 1, ",\"reason\":\"selftest\"");
-        string txManyRaw = tools.CallAsync("edit_transaction", JsonDocument.Parse(sb.ToString()).RootElement.Clone(), default).GetAwaiter().GetResult();
+        string txManyRaw = SelfTest.Unwrapped(tools.CallAsync("edit_transaction", JsonDocument.Parse(sb.ToString()).RootElement.Clone(), default).GetAwaiter().GetResult());
         var txMany = JsonSerializer.Deserialize<TransactionResult>(txManyRaw, RpcJson.Default.TransactionResult)!;
         SelfTest.CheckPublic(txMany.Applied == 9 && txMany.Files.All(f => f.SavedOk is null) && many.All(f => File.ReadAllText(f) == "m" + nl),
             "txn: с reason — 9 файлов применены в RAM, save не запрашивался (SavedOk null, диск чист)");
@@ -1489,7 +1501,7 @@ static class V093Nag {
         string t1 = Path.Combine(dir, "nag-t1.txt"); File.WriteAllText(t1, "a" + nl);
         string t2 = Path.Combine(dir, "nag-t2.txt"); File.WriteAllText(t2, "b" + nl);
         var tx = JsonSerializer.Deserialize<TransactionResult>(
-            tools.CallAsync("edit_transaction", JsonDocument.Parse($$"""{"steps":[{"path":"{{J(t1)}}","edits":[{"start":1,"end":1,"new_text":"A"}]},{"path":"{{J(t2)}}","edits":[{"start":1,"end":1,"new_text":"B"}]}]}""").RootElement.Clone(), default).GetAwaiter().GetResult(),
+            SelfTest.Unwrapped(tools.CallAsync("edit_transaction", JsonDocument.Parse($$"""{"steps":[{"path":"{{J(t1)}}","edits":[{"start":1,"end":1,"new_text":"A"}]},{"path":"{{J(t2)}}","edits":[{"start":1,"end":1,"new_text":"B"}]}]}""").RootElement.Clone(), default).GetAwaiter().GetResult()),
             RpcJson.Default.TransactionResult)!;
         SelfTest.CheckPublic(tx.UnsavedFiles == 2, "nag: транзакция без save отчитывается unsavedFiles=2");
 

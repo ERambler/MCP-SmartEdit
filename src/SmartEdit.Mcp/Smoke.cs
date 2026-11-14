@@ -100,7 +100,7 @@ public static class Smoke {
             Check("init: version в ответе", initRaw.Contains(Rpc.McpProtocolHandler.ServerVersion), initRaw[..Math.Min(80, initRaw.Length)]);
             var list = await Call("tools/list");
             var toolsRaw = list.ToString();
-            Check("tools/list: 26 инструментов", toolsRaw.Split("\"name\"").Length - 1 >= 26, toolsRaw[..Math.Min(60, toolsRaw.Length)]);
+            Check("tools/list: 20 инструментов (7 скрыты #22)", toolsRaw.Split("\"name\"").Length - 1 >= 20, toolsRaw[..Math.Min(60, toolsRaw.Length)]);
             Check("init: id коррелирует", init.GetProperty("id").GetInt32() == 1);
             var bogus = await Call("no/such/method");
             Check("unknown method → JSON-RPC error", IsErr(bogus));

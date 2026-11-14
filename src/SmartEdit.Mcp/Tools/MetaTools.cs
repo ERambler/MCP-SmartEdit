@@ -8,17 +8,17 @@ namespace SmartEdit.Mcp.Tools;
 
 // v0.2 мета-утилиты: калькулятор, атрибуты файла, конвертация кодировки.
 
-sealed class CalcTool : ITool {
-    public string Name => "calc";
-    public string Description =>
+sealed class CalcTool : HiddenTool {
+    public override string Name => "calc";
+    public override string Description =>
         "Exact calculator (LLMs are bad at arithmetic): + - * / % ^ (power, right-assoc), unary minus, postfix ! factorial, " +
         "hex 0x…, binary 0b…, scientific 1e-3, functions sin cos tan asin acos atan atan2 sqrt abs ln log log2 log10 exp " +
         "round floor ceil min max pow, constants pi e tau. Integer results also shown as hex.";
-    public string InputSchemaJson => """
+    public override string InputSchemaJson => """
         {"type":"object","properties":{"expression":{"type":"string"}},"required":["expression"]}
         """;
 
-    public Task<string> ExecuteAsync(JsonElement args, CancellationToken ct) {
+    public override Task<string> ExecuteAsync(JsonElement args, CancellationToken ct) {
         string expr = args.GetString("expression");
         if (expr == "") throw new ArgumentException("expression is required");
         string value = Calc.Evaluate(expr);
@@ -77,13 +77,13 @@ sealed class FileInfoTool : ITool {
     }
 }
 
-sealed class ConvertTool : ITool {
-    public string Name => "convert";
-    public string Description =>
+sealed class ConvertTool : HiddenTool {
+    public override string Name => "convert";
+    public override string Description =>
         "Convert file encoding in place (atomic, .smartedit-bak backup kept). " +
         "from: autodetect (BOM/UTF-8; non-UTF-8 needs explicit 'cp1251' etc). to: utf-8 | utf-8-bom | utf-16le | utf-16be | cp1251. " +
         "utf-8 output has no BOM unless utf-8-bom.";
-    public string InputSchemaJson => """
+    public override string InputSchemaJson => """
         {"type":"object","properties":{
           "path":{"type":"string"},
           "to":{"type":"string","enum":["utf-8","utf-8-bom","utf-16le","utf-16be","cp1251"]},
@@ -91,7 +91,7 @@ sealed class ConvertTool : ITool {
         },"required":["path","to"]}
         """;
 
-    public Task<string> ExecuteAsync(JsonElement args, CancellationToken ct) {
+    public override Task<string> ExecuteAsync(JsonElement args, CancellationToken ct) {
         string path = args.GetString("path");
         if (path == "" || !File.Exists(path)) throw new FileNotFoundException("file not found: " + path);
         path = System.IO.Path.GetFullPath(path);
@@ -184,14 +184,14 @@ sealed class LogTool : ITool {
 /// rev-протокол, error kinds → действия. Консилиум: «самый дешёвый токен-выигрыш — один вызов
 /// вместо 5 раундов тыка». Плюс приглашение на первый tools/call в сессии (см. McpProtocolHandler).
 /// </summary>
-sealed class HelpTool : ITool {
-    public string Name => "help";
-    public string Description =>
+sealed class HelpTool : HiddenTool {
+    public override string Name => "help";
+    public override string Description =>
         "ONE page you can trust: tool map (one line each), [start..end] semantics (1-based inclusive, end=start-1 inserts, [1..0] = empty file), " +
         "the rev protocol, and every error kind with the exact next action. Call it once at session start instead of reverse-engineering the API.";
-    public string InputSchemaJson => """{"type":"object","properties":{},"required":[]}""";
+    public override string InputSchemaJson => """{"type":"object","properties":{},"required":[]}""";
 
-    public Task<string> ExecuteAsync(JsonElement args, CancellationToken ct) {
+    public override Task<string> ExecuteAsync(JsonElement args, CancellationToken ct) {
         const string page =
 """
 SMARTEDIT — GOLDEN RULES

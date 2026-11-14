@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.13.0 (2026-11-14)
+
+- **Deprecation wave #22, phase 1** (telemetry-driven: 7 tools, 0 live calls in ~1800): `symbols`, `calc`, `convert`, `sync`, `help`, `sessions`, `edit_transaction` are **hidden from `tools/list`** — the manifest shrinks 27 → 20. Nothing is deleted:
+  - calling a hidden tool BY NAME still works — the response is wrapped in `{deprecated:true, note:"…migrate now", result:<original>}` and the shared journal logs `deprecated:name` (phase 2 in v0.13+ will delete by this telemetry);
+  - safety net is deliberate (consilium): `undo` (4 calls) and `check` (15) stay visible — frequency is not the metric for insurance;
+  - `edit_transaction` mechanics remain the engine inside `recipe_apply` — only the public duplicate is hidden.
+- Mechanism: `ITool.Hidden` (default-interface member, false), `HiddenTool` base class for the 7, `ToolRegistry` filters the manifest and wraps hidden calls; unknown-tool errors now list only visible names.
 ## v0.12.1 (2026-11-14)
 
 - **Native AOT builds ship as the PRIMARY artifact** (audit follow-up: "nobody installs .NET to try a text editor"):

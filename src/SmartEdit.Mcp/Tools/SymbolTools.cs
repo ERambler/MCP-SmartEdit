@@ -6,20 +6,20 @@ namespace SmartEdit.Mcp.Tools;
 
 // v0.2: структура кода (symbols), скобочный аудит (check), карта проекта по namespace (tree).
 
-sealed class SymbolsTool : ITool {
-    public string Name => "symbols";
-    public string Description =>
+sealed class SymbolsTool : HiddenTool {
+    public override string Name => "symbols";
+    public override string Description =>
         "Code structure of an open session (by extension): C# namespaces/classes/members with XML-doc summaries, " +
         "Python class/def with docstrings, JS/TS/Java/C++ functions and types, XML/HTML tag trees. " +
         "Line numbers map 1:1 to show/replace_lines. docs_only=true returns only documented symbols. Cache: recomputed on rev change.";
-    public string InputSchemaJson => """
+    public override string InputSchemaJson => """
         {"type":"object","properties":{
           "session_id":{"type":"string","description":"from a previous response; optional if path given"},"path":{"type":"string","description":"open-by-path: skip open entirely"},
           "docs_only":{"type":"boolean","description":"only symbols with XML-doc/docstring (C#/Python), default false"}
         },"required":[]}
         """;
 
-    public async Task<string> ExecuteAsync(JsonElement args, CancellationToken ct) {
+    public async override Task<string> ExecuteAsync(JsonElement args, CancellationToken ct) {
         var s = Sessions.Resolve(args.GetNullableString("session_id"), args.GetNullableString("path")).Doc;
         bool docsOnly = args.GetBool("docs_only");
         var result = await ToolOps.LockedAsync(s, () => s.Symbols(docsOnly));

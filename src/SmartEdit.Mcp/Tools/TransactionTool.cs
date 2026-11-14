@@ -19,17 +19,17 @@ sealed class TxStep {
 /// доволен → сохранил (save:true = per-file best-effort с честным статусом; кросс-файловая дисковая
 /// атомарность в POSIX невозможна и не обещается). Путь ИЛИ session_id на шаг (смерть ритуала open).
 /// </summary>
-sealed class TransactionTool : ITool {
+sealed class TransactionTool : HiddenTool {
     static readonly SemaphoreSlim TxnGate = new(1, 1);
 
-    public string Name => "edit_transaction";
-    public string Description =>
+    public override string Name => "edit_transaction";
+    public override string Description =>
         "Atomic edits across MULTIPLE files in ONE call — the all-or-nothing refactor. " +
         "steps=[{path|session_id, edits:[{start,end,new_text,expect_old?}], expected_rev?}] (expected_rev omitted = accept current; anchors still validated). " +
         "Every range/anchor/rev is validated on EVERY file BEFORE anything applies — one bad step rejects the whole transaction (kind=transaction_aborted names the file). " +
         "Disk philosophy: save defaults to FALSE (RAM-staging; save each file when happy); save=true saves per-file best-effort with honest per-file status — cross-file DISK atomicity is not promised (RAM atomicity is). " +
         "Limits: 1..16 files, <=200 edits total, >8 files requires reason. Gates: global txn lock, then per-file locks in canonical path order. dry_run=true → planned diffs only.";
-    public string InputSchemaJson => """
+    public override string InputSchemaJson => """
         {"type":"object","properties":{
           "steps":{"type":"array","minItems":1,"maxItems":16,"items":{"type":"object","properties":{
             "path":{"type":"string","description":"file path (open-by-path: skip open entirely)"},
@@ -46,7 +46,7 @@ sealed class TransactionTool : ITool {
         },"required":["steps"]}
         """;
 
-    public async Task<string> ExecuteAsync(JsonElement args, CancellationToken ct) {
+    public async override Task<string> ExecuteAsync(JsonElement args, CancellationToken ct) {
         bool dryRun = args.GetBool("dry_run");
         bool save = args.GetBool("save");
 

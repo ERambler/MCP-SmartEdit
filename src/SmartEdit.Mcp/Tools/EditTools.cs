@@ -499,14 +499,14 @@ sealed class CloseTool : ITool {
     }
 }
 
-sealed class SessionsTool : ITool {
-    public string Name => "sessions";
-    public string Description =>
+sealed class SessionsTool : HiddenTool {
+    public override string Name => "sessions";
+    public override string Description =>
         "List open documents and every attachment (diagnostics): path, shared rev, dirty, per-editor id/note/pending edits/stale marker. " +
         "Use when a file feels locked (open sessions hold it FileShare.Read — external writes fail) or before barging into a busy file.";
-    public string InputSchemaJson => """{"type":"object","properties":{},"required":[]}""";
+    public override string InputSchemaJson => """{"type":"object","properties":{},"required":[]}""";
 
-    public Task<string> ExecuteAsync(JsonElement args, CancellationToken ct)
+    public override Task<string> ExecuteAsync(JsonElement args, CancellationToken ct)
         => Task.FromResult(ToolOps.Json(new SessionsResult {
             Sessions = [.. Sessions.Map.Values.OrderBy(a => a.Doc.Path).ThenBy(a => a.Id).Select(a => new SessionDto {
                 SessionId = a.Id, Path = a.Doc.Path, Rev = a.Doc.Rev, Dirty = a.Doc.Dirty,
@@ -517,19 +517,19 @@ sealed class SessionsTool : ITool {
 }
 
 /// <summary>v0.4: осознанная синхронизация перед большой правкой: peers + события с since_rev.</summary>
-sealed class SyncTool : ITool {
-    public string Name => "sync";
-    public string Description =>
+sealed class SyncTool : HiddenTool {
+    public override string Name => "sync";
+    public override string Description =>
         "Explicit collaboration sync: returns current rev, peers (id, note, pending edits, stale) and compact edit events since since_rev " +
         "(default: your last seen). Call before a big edit in a shared file to see who did what. No state change besides your last_seen.";
-    public string InputSchemaJson => """
+    public override string InputSchemaJson => """
         {"type":"object","properties":{
           "session_id":{"type":"string","description":"from a previous response; optional if path given"},"path":{"type":"string","description":"open-by-path: skip open entirely"},
           "since_rev":{"type":"integer","description":"default: your attachment's last seen rev"}
         },"required":[]}
         """;
 
-    public async Task<string> ExecuteAsync(JsonElement args, CancellationToken ct) {
+    public async override Task<string> ExecuteAsync(JsonElement args, CancellationToken ct) {
         var att = Sessions.Resolve(args.GetNullableString("session_id"), args.GetNullableString("path"));
         var s = att.Doc;
         Sessions.Touch(att);
