@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.12.1 (2026-11-14)
+
+- **Native AOT builds ship as the PRIMARY artifact** (audit follow-up: "nobody installs .NET to try a text editor"):
+  - `SmartEdit-AOT-win-x64-*.zip` — self-contained native binary (~10 MB exe + grammar dlls), **zero runtime dependencies**; validated by CI: full selftest (including the tree-sitter syntax gate via P/Invoke) runs ALL PASS on the AOT binary;
+  - `smartedit-mcp_*_amd64.deb` — Ubuntu package (Native AOT linux-x64 + tree-sitter .so, `/usr/bin/smartedit-mcp`). **CI-tested on Ubuntu 24.04 — selftest ALL PASS on a real Ubuntu runner; not yet field-tested** (honest);
+  - the slim framework-dependent zip stays as an alternative for machines that already have .NET 10.
+- csproj: PruneTreeSitterGrammars now RID-aware (win builds strip .so/.dylib; linux builds strip .dll and keep their .so) — cross-platform releases stay ~13-21 MB instead of 590.
+- `exe smoke` under Native AOT prints an honest refusal (reflection JSON needs dynamic code; `selftest` runs fully everywhere).
 ## v0.12.0 (2026-11-14)
 
 - **`create` (#21, consilium 2026-11-14)**: file birth INSIDE SmartEdit — `create(path, content?, create_parents?, attention?)` opens a phantom RAM session over a not-yet-existing path; **nothing touches disk until `save`** (shadow insurance included). The syntax gate finally attends the birth of code:

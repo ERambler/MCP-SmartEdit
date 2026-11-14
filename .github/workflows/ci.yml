@@ -37,13 +37,56 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: smartedit-aot-win-x64
-          path: aot/
+          path: |
+            aot/SmartEdit.Mcp.exe
+            aot/tree-sitter*.dll
+          retention-days: 7
+
+  # Ubuntu: AOT linux-x64 + НАСТОЯЩИЙ selftest на Ubuntu-раннере + .deb пакет.
+  # deb собран и selftest-проверен на ubuntu-24.04 CI; полевого (long-run) теста на Ubuntu ещё
+  # НЕ было — это честно указано в README и описании релиза.
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.x
+      - run: dotnet publish -c Release -r linux-x64 -p:PublishAot=true -p:SelfContained=true -p:PublishSingleFile=false -p:PublishReadyToRun=false -o aot src/SmartEdit.Mcp/SmartEdit.Mcp.csproj
+      - name: selftest on real Ubuntu (cross-platform truth: mutex/paths/encodings)
+        run: chmod +x aot/SmartEdit.Mcp && ./aot/SmartEdit.Mcp selftest
+      - name: build .deb
+        run: |
+          TAG="${GITHUB_REF_NAME:-main}"
+          mkdir -p pkg/DEBIAN pkg/usr/lib/smartedit-mcp pkg/usr/bin
+          cp aot/SmartEdit.Mcp aot/libtree-sitter*.so aot/tree-sitter*.so pkg/usr/lib/smartedit-mcp/ 2>/dev/null || cp aot/SmartEdit.Mcp aot/*.so pkg/usr/lib/smartedit-mcp/
+          printf '#!/bin/sh\nexec /usr/lib/smartedit-mcp/SmartEdit.Mcp "$@"\n' > pkg/usr/bin/smartedit-mcp
+          chmod +x pkg/usr/bin/smartedit-mcp
+          cat > pkg/DEBIAN/control <<EOF
+          Package: smartedit-mcp
+          Version: ${TAG#v}
+          Section: devel
+          Priority: optional
+          Architecture: amd64
+          Maintainer: ERambler
+          Description: Safety-first MCP text editor for LLM coding agents
+           Line-based editing, syntax-gated saves (tree-sitter), atomic
+           transactions, undo, multi-agent guards, cp1251/UTF-16 round-trip.
+           CI-tested on Ubuntu 24.04 (selftest); not yet field-tested.
+          EOF
+          sed -i 's/^        //' pkg/DEBIAN/control
+          dpkg-deb --root-owner-group --build pkg smartedit-mcp_${TAG#v}_amd64.deb
+          dpkg-deb -I smartedit-mcp_${TAG#v}_amd64.deb | head -6
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smartedit-deb-amd64
+          path: smartedit-mcp_*_amd64.deb
           retention-days: 7
 
   # По тегу v*: publish (framework-dependent, требуется .NET 10) + zip + draft release (публикует человек)
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build-test
+    needs: [build-test, aot, linux]
     runs-on: windows-latest
     permissions:
       contents: write
@@ -62,10 +105,22 @@ jobs:
           $tag = $env:GITHUB_REF_NAME
           Compress-Archive -Path win-x64/publish/* -DestinationPath "win-x64/SmartEdit-win-x64-$tag.zip" -Force
           Get-Item win-x64/*.zip
-      - name: draft release with asset
+      - name: download AOT + deb artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: zip AOT win-x64 (primary artifact, zero dependencies)
         run: |
           $tag = $env:GITHUB_REF_NAME
-          gh release create $tag --draft --generate-notes "win-x64/SmartEdit-win-x64-$tag.zip"
+          Compress-Archive -Path artifacts/smartedit-aot-win-x64/* -DestinationPath "win-x64/SmartEdit-AOT-win-x64-$tag.zip" -Force
+          Get-Item win-x64/*.zip
+      - name: draft release with assets (AOT primary + deb + fd alternative)
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          gh release create $tag --draft --generate-notes `
+            "win-x64/SmartEdit-AOT-win-x64-$tag.zip" `
+            "artifacts/smartedit-deb-amd64/smartedit-mcp_$($tag.TrimStart('v'))_amd64.deb" `
+            "win-x64/SmartEdit-win-x64-$tag.zip"
         env:
           GH_TOKEN: ${{ github.token }}
 

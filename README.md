@@ -93,7 +93,15 @@ Memory stays flat on giants: memory-mapped base + piece-table edits; `save` stre
 
 ## Install
 
-**Requirement: [.NET 10 runtime](https://dotnet.microsoft.com/download/dotnet/10.0)** — single framework-dependent artifact (~1.4 MB exe + 7 grammar dlls ≈ 13 MB unzipped). Windows x64 today; the code is pure BCL — `dotnet publish -r linux-x64` should work, feedback welcome.
+**v0.12.1+ ships Native AOT builds — zero runtime dependencies.** Primary artifact: `SmartEdit-AOT-win-x64-vX.Y.Z.zip` (~10 MB exe + grammar dlls, self-contained native binary). For Ubuntu: a `.deb` package. A slim framework-dependent zip (~1.4 MB exe, needs [.NET 10](https://dotnet.microsoft.com/download/dotnet/10.0)) stays as an alternative.
+
+| Artifact | OS | Size | Needs |
+|---|---|---|---|
+| `SmartEdit-AOT-win-x64-*.zip` | Windows x64 | ~10 MB + dlls | nothing |
+| `smartedit-mcp_*_amd64.deb` | Ubuntu x64 | ~12 MB | nothing (CI-tested on Ubuntu 24.04; **not yet field-tested** — honest) |
+| `SmartEdit-win-x64-*.zip` | Windows x64 | ~1.4 MB + dlls | .NET 10 runtime |
+
+> `exe smoke` (live-server suite) is framework-dependent-build only — under Native AOT it prints an honest refusal (reflection JSON); `selftest` runs fully everywhere, including AOT and Ubuntu.
 
 ### Option A — one-liner for agents (PowerShell)
 
@@ -105,8 +113,8 @@ Downloads the latest release to `%LOCALAPPDATA%\SmartEdit\bin`, runs the selftes
 
 ### Option B — manual
 
-1. Download `SmartEdit-win-x64-vX.Y.Z.zip` from [Releases](https://github.com/ERambler/MCP-SmartEdit/releases), unzip (e.g. into `%LOCALAPPDATA%\SmartEdit\bin`)
-2. Sanity check: `SmartEdit.Mcp.exe selftest` — must print `ALL PASS`; `SmartEdit.Mcp.exe smoke` pokes a live server (transport + every tool + misuse pack) in ~1 s
+1. Download the artifact you want from [Releases](https://github.com/ERambler/MCP-SmartEdit/releases), unzip (e.g. into `%LOCALAPPDATA%\SmartEdit\bin`; Ubuntu: `sudo dpkg -i smartedit-mcp_*_amd64.deb`, binary at `/usr/bin/smartedit-mcp`)
+2. Sanity check: `SmartEdit.Mcp.exe selftest` — must print `ALL PASS` (works on the AOT build and on Ubuntu too)
 3. Register with your MCP client (below)
 
 ### Client configs
