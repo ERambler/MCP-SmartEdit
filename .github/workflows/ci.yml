@@ -53,7 +53,7 @@ jobs:
         with:
           dotnet-version: 10.x
       - run: dotnet publish -c Release -r linux-x64 -p:PublishAot=true -p:SelfContained=true -p:PublishSingleFile=false -p:PublishReadyToRun=false -o aot src/SmartEdit.Mcp/SmartEdit.Mcp.csproj
-      - name: selftest on real Ubuntu (cross-platform truth: mutex/paths/encodings)
+      - name: selftest on real Ubuntu (mutex, paths, encodings — cross-platform truth)
         run: chmod +x aot/SmartEdit.Mcp && ./aot/SmartEdit.Mcp selftest
       - name: build .deb
         run: |
