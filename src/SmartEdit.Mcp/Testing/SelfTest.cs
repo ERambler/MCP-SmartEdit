@@ -1570,7 +1570,8 @@ static class V081Help {
             "help: error kinds с действиями");
         SelfTest.CheckPublic(new[] { "edit_batch", "edit_transaction", "replace_content", "replace_all", "undo", "goto", "sessions", "calc", "path-first" }.All(t => page.Contains(t)),
             "help: все ключевые инструменты в карте");
-        SelfTest.CheckPublic(page.Length < 6000, $"help: компактен ({page.Length} симв.) — один вызов, не простыня");
+        SelfTest.CheckPublic(page.Replace("\r\n", "\n").Length < 6000, // CRLF-чекаут Windows-CI не должен рвать замер (сырая строка хранит переводы строк)
+            $"help: компактен ({page.Replace("\r\n", "\n").Length} симв.) — один вызов, не простыня");
     }
 }
 
