@@ -57,6 +57,8 @@ public sealed class EditSession : IDisposable {
     // ── #5 attention tracking: какие диапазоны РЕДАКТОР реально видел (opt-in: open(attention:true)) ──
     /// <summary>Включён ли трекинг внимания для этого документа (свойство документа, не актора).</summary>
     public bool Attention { get; internal set; }
+    /// <summary>#24 (v0.13.2): последнее обращение к документу — часы LRU-вытеснения чистых сессий (Sessions).</summary>
+    internal DateTime LastUsed { get; set; } = DateTime.UtcNow;
     /// <summary>actor → отсортированные слитые интервалы «видел» (start, end, rev, via).</summary>
     readonly Dictionary<string, List<(int Start, int End, int Rev, string Via)>> _seen = new();
 

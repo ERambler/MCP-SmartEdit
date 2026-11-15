@@ -28,7 +28,8 @@ SMARTEDIT — GOLDEN RULES
 - errors are JSON {kind,...} — branch on kind, never parse prose; machine retry: {strategy: reissue_with_rev|reanchor|reread_range, start?, end?}
 
 TOOL MAP
-navigate : open(path, note?) → sessionId, rev, code_outline(≤5k-line code, +total/truncated), peers | show(start,end,max_chars?)
+navigate : tree(path) FIRST — skeleton (deep default): types + inheritance Base(file:line) + path:line anchors = show/replace_lines coords; token-budgeted; flat list on pattern/recent_hours
+          open(path, note?) → sessionId, rev, code_outline(≤5k-line code, +total/truncated), peers | show(start,end,max_chars?)
           create(path, content?, create_parents?) — NEW file as a RAM session (#21): nothing on disk until save; advisory
           syntax check of the seed in the response; FIRST save gates hard (fix in RAM, save once; force = conscious);
           existing file/session → already_exists; create_parents=true makes dirs at save
@@ -39,7 +40,7 @@ edit     : replace_lines(start,end,new_text,expected_rev,expect_old?) | insert_a
           validated on all files BEFORE anything applies; one bad step aborts everything (kind=transaction_aborted)
           replace_content(find, replace) — EXACT text, no line numbers; must be unique (0 → not_found, >1 → ambiguous_match)
           undo(n, expected_rev) — undo×2 = redo, peer-safe compensating mutations
-lifecycle: save(keeps encoding; force=true publishes peers' edits too) | close(discard?) | sessions | sync
+lifecycle: save(keeps encoding; force=true publishes peers' edits too) | sessions | sync | close(discard? — hidden, auto-evict)
 ops      : check(bracket audit) | log(tail/grep/errors_only — shared journal) | calc(exact math) | convert(encoding)
 recipes : recipe_save(name, steps[{find,replace}], description?) — persist a validated refactor with {{param}} placeholders;
            recipe_apply(name, params, paths[1..16], dry_run?) replays it by TEXT anchors (unique occurrence each) —

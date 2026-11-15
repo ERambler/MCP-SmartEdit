@@ -60,6 +60,8 @@ public static class SelfTest {
         V111Recipes.Run(dir);
         V112Incident.Run(dir);
         V113Create.Run(dir);
+        V132DeepMap.Run(dir);
+        V132Evict.Run(dir);
         V03Features.BatchAndAnchors(dir);
         await V03Features.StructuredErrorsAsync(dir);
         V03Features.ReplaceAllTests(dir);
@@ -296,7 +298,7 @@ public static class SelfTest {
         SelfTest.Check(err is null && res!.Value.GetProperty("serverInfo").GetProperty("name").GetString() == "smartedit", "proto: initialize");
 
         (res, err) = await h.HandleAsync(new RpcRequest { Method = "tools/list", Id = J("2") });
-        SelfTest.Check(err is null && res!.Value.GetProperty("tools").GetArrayLength() == 20, "proto: 20 инструментов (7 скрыты #22)");
+        SelfTest.Check(err is null && res!.Value.GetProperty("tools").GetArrayLength() == 19, "proto: 19 инструментов (8 скрыты: #22 ×7 + close #24)");
 
         string p = Path.Combine(dir, "proto.txt");
         File.WriteAllText(p, "1\n2\n3\n");
@@ -338,7 +340,7 @@ public static class SelfTest {
         => JsonSerializer.Deserialize<OpenResult>(PayloadText(result, err), RpcJson.Default.OpenResult)!;
 
     static CloseResult ClosePayload(JsonElement? result, RpcError? err)
-        => JsonSerializer.Deserialize<CloseResult>(PayloadText(result, err), RpcJson.Default.CloseResult)!;
+        => JsonSerializer.Deserialize<CloseResult>(SelfTest.Unwrapped(PayloadText(result, err)), RpcJson.Default.CloseResult)!; // #24: close скрыт — обёртка {deprecated,result}
 
     static MutationResult MutPayload(JsonElement? result, RpcError? err)
         => JsonSerializer.Deserialize<MutationResult>(PayloadText(result, err), RpcJson.Default.MutationResult)!;
@@ -764,7 +766,7 @@ static class V04Features {
     }
 
     static T Call<T>(ToolRegistry tools, string name, string argsJson, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> ti)
-        => JsonSerializer.Deserialize<T>(tools.CallAsync(name, JsonDocument.Parse(argsJson).RootElement.Clone(), default).GetAwaiter().GetResult(), ti)!;
+        => JsonSerializer.Deserialize<T>(SelfTest.Unwrapped(tools.CallAsync(name, JsonDocument.Parse(argsJson).RootElement.Clone(), default).GetAwaiter().GetResult()), ti)!; // #24: close скрыт — обёртка {deprecated,result}
 
     static ToolErrorPayload? CallErr(ToolRegistry tools, string name, string argsJson) {
         try {
@@ -1919,5 +1921,199 @@ static class V113Create {
         SelfTest.CheckThrows<ToolException>(() => EditSession.CreateNew(dir, "x", false), "create: директория отклонена", "invalid_args");
         SelfTest.CheckThrows<ToolException>(() => EditSession.CreateNew(Path.Combine(dir, "nul.cs"), "a\0b", false),
             "create: NUL-байты отклонены", "invalid_args");
+
+    }
+}
+/// <summary>
+/// #23 (v0.13.2): tree(deep) — скелет-карта проекта на tree-sitter. Замки: формат якорей/рёбер,
+/// бюджет с честным хвостом, авто-откат при точечном запросе, mtime-кэш, многоязычность (cs/py/ts).
+/// </summary>
+static class V132DeepMap {
+    public static void Run(string dir) {
+        var tools = new ToolRegistry();
+        tools.RegisterAllTools();
+
+        // ── мини-репо: детерминированные проверки экстрактора и рёбер ──
+        string mini = Path.Combine(dir, "mini");
+        Directory.CreateDirectory(mini);
+        File.WriteAllText(Path.Combine(mini, "Beta.cs"), "namespace Mini;\nclass Base { }\n");
+        File.WriteAllText(Path.Combine(mini, "Alpha.cs"),
+            "namespace Mini;\n\nclass Alpha : Base {\n    /// <summary>Saves things.</summary>\n    int Save(bool force) { return 1; }\n    private int _x;\n}\n");
+        File.WriteAllText(Path.Combine(mini, "svc.py"),
+            "class Service:\n    def run(self):\n        pass\n\nclass Child(Service):\n    '''doc for Child'''\n    def go(self, x):\n        return x\n");
+        File.WriteAllText(Path.Combine(mini, "web.ts"),
+            "export class OrderService extends Base {\n    fetch(url: string) { return fetch(url); }\n}\nexport function helper(x) { return x; }\n");
+
+        var t = Call(tools, mini);
+        SelfTest.CheckPublic(t.Deep && t.Map is not null, "deep: включён по умолчанию, Map в ответе");
+        string m = t.Map!;
+        SelfTest.CheckPublic(m.Contains("class Alpha : Base(Beta.cs:2)"), "deep: ребро наследования резолвится в якорь Base(Beta.cs:2)");
+        SelfTest.CheckPublic(m.Contains("Save(force) — Saves things."), "deep: член с аргументами + XML-doc первой строкой");
+        SelfTest.CheckPublic(m.Contains("class Child : Service(svc.py:1)"), "deep: py-класс с базой, ребро до собственного файла");
+        SelfTest.CheckPublic(m.Contains("go(x)"), "deep: py-метод без self, с аргументом");
+        SelfTest.CheckPublic(m.Contains("class OrderService : Base"), "deep: ts-класс с extends");
+        SelfTest.CheckPublic(m.Contains("fetch(url)"), "deep: ts-метод");
+        SelfTest.CheckPublic(m.Contains("langs: "), "deep: языковый ценз в шапке");
+        SelfTest.CheckPublic(m.Contains("Alpha.cs:3 [7]"), "deep: якорь файла = строка первого типа, [строки]");
+
+        // ── кэш mtime: правка файла → карта меняется (save меняет mtime — тот же механизм) ──
+        File.WriteAllText(Path.Combine(mini, "Alpha.cs"),
+            "namespace Mini;\n\nclass Alpha : Base {\n    int Save(bool force) { return 1; }\n}\n\nclass Gamma { }\n");
+        t = Call(tools, mini);
+        SelfTest.CheckPublic(t.Map!.Contains("class Gamma"), "deep: mtime-кэш перепарсивает изменившийся файл (не отдаёт старицу)");
+
+        // ── авто-откат: точечный запрос → плоский список ──
+        var flat = Call(tools, mini, ",\"pattern\":\"*.cs\"");
+        SelfTest.CheckPublic(!flat.Deep && flat.Map is null && flat.Groups.Length > 0, "deep: авто-откат при pattern (Groups, без скелета)");
+        var recent = Call(tools, mini, ",\"recent_hours\":1");
+        SelfTest.CheckPublic(!recent.Deep && recent.Groups.Length > 0, "deep: авто-откат при recent_hours");
+        var off = Call(tools, mini, ",\"deep\":false");
+        SelfTest.CheckPublic(!off.Deep && off.Groups.Length > 0, "deep: явный deep=false — старый формат");
+
+        // ── собственный репо: бюджет и честный хвост ──
+        string? root = FindRepoRoot(AppContext.BaseDirectory);
+        if (root is null) {
+            SelfTest.CheckPublic(true, "deep: репо-замки пропущены (запуск вне репо)");
+            return;
+        }
+        var repo = Call(tools, root, ",\"budget_tokens\":8192");
+        SelfTest.CheckPublic(repo.Map!.Contains("class EditSession : IDisposable"), "deep: собственный репо — EditSession : IDisposable");
+        SelfTest.CheckPublic(repo.Map.Contains("ToolBase(src/SmartEdit.Mcp/Tools/ToolBase.cs:"), "deep: рёбра до якоря ToolBase(file:line)");
+
+        var tiny = MapBuilder.Render(root, 512);
+        var full = MapBuilder.Render(root, 8192);
+        SelfTest.CheckPublic(tiny.TypesShown < tiny.TypesTotal && tiny.Text.Contains("types — raise budget_tokens"),
+            $"deep: бюджет 512 режет скелет с честным хвостом (+{tiny.TypesTotal - tiny.TypesShown} скрыто)");
+        SelfTest.CheckPublic(full.TypesShown > tiny.TypesShown, $"deep: бюджет 8192 показывает больше ({full.TypesShown} > {tiny.TypesShown})");
+        SelfTest.CheckPublic(full.FilesTotal == tiny.FilesTotal, "deep: инвентарь файлов всегда полный (бюджет режет только скелет)");
+    }
+
+    static TreeResult Call(ToolRegistry tools, string path, string extra = "") =>
+        JsonSerializer.Deserialize<TreeResult>(SelfTest.Unwrapped(
+            tools.CallAsync("tree", JsonDocument.Parse($"{{\"path\":{JsonSerializer.Serialize(path, RpcJson.Default.String)}{extra}}}").RootElement.Clone(), default)
+                .GetAwaiter().GetResult()), RpcJson.Default.TreeResult)!;
+
+    static string? FindRepoRoot(string start) {
+        var d = new DirectoryInfo(start);
+        while (d is not null) {
+            if (Directory.Exists(Path.Combine(d.FullName, ".git"))) return d.FullName;
+            d = d.Parent!;
+        }
+        return null;
+    }
+}
+
+/// <summary>
+/// #24 (v0.13.2): жизненный цикл сессий — автовытеснение чистых (idle/cap), грязные неприкосновенны,
+/// close живёт по имени (скрыт), path-first re-open после вытеснения.
+/// </summary>
+static class V132Evict {
+    public static void Run(string dir) {
+        var tools = new ToolRegistry();
+        tools.RegisterAllTools();
+
+        string trigger = Path.Combine(dir, "ev-trigger.txt");
+        File.WriteAllText(trigger, "t\n");
+        void Kick() => _ = Sessions.Resolve(null, trigger); // любой вызов = фоновая проверка (без таймеров)
+
+        // ── idle: чистая осиротевшая вытесняется; журнал пишет session:evict ──
+        string f1 = Path.Combine(dir, "ev1.txt");
+        File.WriteAllText(f1, "a\n");
+        var att1 = Sessions.Resolve(null, f1);
+        var doc1 = att1.Doc;
+        Backdate(att1, doc1);
+        Kick();
+        SelfTest.CheckPublic(!Sessions.ByPath.ContainsKey(Path.GetFullPath(f1)), "evict: чистая сессия вытеснена по idle");
+        SelfTest.CheckPublic(JournalHas("session:evict", f1, "reason=idle"), "evict: журнал пишет session:evict reason=idle");
+
+        // ── re-open после вытеснения: с нуля (rev, история пуста) ──
+        var again = Sessions.Resolve(null, f1);
+        SelfTest.CheckPublic(again.Doc.Rev == 0 && again.Doc.History.Count == 0, "evict: path-first re-open после вытеснения — сессия с нуля");
+        string json = tools.CallAsync("replace_lines",
+            JsonDocument.Parse($"{{\"path\":{JsonSerializer.Serialize(f1, RpcJson.Default.String)},\"start\":1,\"end\":1,\"new_text\":\"b\"}}").RootElement.Clone(),
+            default).GetAwaiter().GetResult();
+        SelfTest.CheckPublic(json.Contains("\"rev\":1"), "evict: правка после re-open даёт rev=1 (история с нуля)");
+        Close(f1, discard: true);
+        _ = Sessions.Resolve(null, f1); // свежая сессия — история ушла вместе с вытесненной
+        string? undoKind = null;
+        try {
+            _ = tools.CallAsync("undo",
+                JsonDocument.Parse($"{{\"path\":{JsonSerializer.Serialize(f1, RpcJson.Default.String)}}}").RootElement.Clone(),
+                default).GetAwaiter().GetResult();
+        }
+        catch (ToolException te) { undoKind = te.Kind; } // без MCP-хендлера ошибки летят исключением
+        SelfTest.CheckPublic(undoKind == "nothing_to_undo", "evict: undo после вытеснения — истории нет (nothing_to_undo)");
+
+        // ── edit + idle → жива (грязные неприкосновенны); save + idle → вытеснена ──
+        string f3 = Path.Combine(dir, "ev3.txt");
+        File.WriteAllText(f3, "x\n");
+        var att3 = Sessions.Resolve(null, f3);
+        _ = tools.CallAsync("replace_lines",
+            JsonDocument.Parse($"{{\"path\":{JsonSerializer.Serialize(f3, RpcJson.Default.String)},\"start\":1,\"end\":1,\"new_text\":\"y\"}}").RootElement.Clone(),
+            default).GetAwaiter().GetResult();
+        Backdate(att3, att3.Doc);
+        Kick();
+        SelfTest.CheckPublic(Sessions.ByPath.ContainsKey(Path.GetFullPath(f3)), "evict: edit+idle — грязная жива (несохранённое свято)");
+        _ = tools.CallAsync("save",
+            JsonDocument.Parse($"{{\"path\":{JsonSerializer.Serialize(f3, RpcJson.Default.String)}}}").RootElement.Clone(),
+            default).GetAwaiter().GetResult();
+        Backdate(att3, att3.Doc); // save сделала clean → теперь кандидат
+        Kick();
+        SelfTest.CheckPublic(!Sessions.ByPath.ContainsKey(Path.GetFullPath(f3)), "evict: save+idle — чистая вытеснена");
+
+        // ── peers: два подключения — вытеснение одного не гасит документ ──
+        string f5 = Path.Combine(dir, "ev5.txt");
+        File.WriteAllText(f5, "p\n");
+        var pAtt = Sessions.Resolve(null, f5);                        // p:-подключение
+        var sAtt = Sessions.Attach(f5, null, "peer-test").Att;        // второе подключение
+        Backdate(pAtt, sAtt.Doc);                                     // устарело только p:
+        Kick();
+        SelfTest.CheckPublic(Sessions.ByPath.ContainsKey(Path.GetFullPath(f5)), "evict: живой peer держит документ");
+        Backdate(sAtt, sAtt.Doc);
+        Kick();
+        SelfTest.CheckPublic(!Sessions.ByPath.ContainsKey(Path.GetFullPath(f5)), "evict: после ухода всех peers чистый документ вытеснен");
+
+        // ── cap: 20 чистых документов → LRU вытеснение, в журнале reason=cap ──
+        string capDir = Path.Combine(dir, "cap");
+        Directory.CreateDirectory(capDir);
+        for (int i = 0; i < 20; i++) {
+            string f = Path.Combine(capDir, $"c{i}.txt");
+            File.WriteAllText(f, $"{i}\n");
+            _ = Sessions.Resolve(null, f);
+        }
+        SelfTest.CheckPublic(Sessions.ByPath.Count <= 16, $"evict: cap 16 — документов не больше cap (сейчас {Sessions.ByPath.Count})");
+        SelfTest.CheckPublic(JournalHas("session:evict", "reason=cap"), "evict: журнал пишет session:evict reason=cap");
+
+        // ── close по имени жив: discard=true возвращает shadow ──
+        string f6 = Path.Combine(dir, "ev6.txt");
+        File.WriteAllText(f6, "z\n");
+        _ = Sessions.Resolve(null, f6);
+        _ = tools.CallAsync("replace_lines",
+            JsonDocument.Parse($"{{\"path\":{JsonSerializer.Serialize(f6, RpcJson.Default.String)},\"start\":1,\"end\":1,\"new_text\":\"w\"}}").RootElement.Clone(),
+            default).GetAwaiter().GetResult();
+        var closed = Close(f6, discard: true);
+        SelfTest.CheckPublic(closed.Closed && closed.Shadow is not null && closed.Shadow.EndsWith(".smartedit-shadow"),
+            "evict: close (скрытый) по имени жив — discard оставил shadow-страховку");
+
+        static void Backdate(Attachment att, EditSession doc) {
+            att.LastSeen = DateTime.UtcNow.AddMinutes(-31);
+            doc.LastUsed = DateTime.UtcNow.AddMinutes(-31);
+        }
+    }
+
+    static CloseResult Close(string path, bool discard) {
+        var tools = new ToolRegistry();
+        tools.RegisterAllTools();
+        return JsonSerializer.Deserialize<CloseResult>(SelfTest.Unwrapped(tools.CallAsync("close",
+            JsonDocument.Parse($"{{\"path\":{JsonSerializer.Serialize(path, RpcJson.Default.String)},\"discard\":{(discard ? "true" : "false")}}}").RootElement.Clone(),
+            default).GetAwaiter().GetResult()), RpcJson.Default.CloseResult)!;
+    }
+
+    static bool JournalHas(params string[] needles) {
+        string logPath = SmartEdit.Mcp.Infra.Log.ArchivePath(0);
+        if (!File.Exists(logPath)) return false;
+        foreach (var line in File.ReadLines(logPath))
+            if (needles.All(n => line.Contains(n))) return true;
+        return false;
     }
 }

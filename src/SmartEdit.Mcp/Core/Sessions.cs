@@ -25,14 +25,20 @@ sealed class Attachment {
 /// </summary>
 static class Sessions {
     internal static readonly ConcurrentDictionary<string, Attachment> Map = new();
-    static readonly ConcurrentDictionary<string, EditSession> ByPath = new(); // canonical → документ
+    /// <summary>#24: документы без вытеснения копились до смерти сервера; internal — замки selftest.</summary>
+    internal static readonly ConcurrentDictionary<string, EditSession> ByPath = new(); // canonical → документ
     const int MaxSessions = 32;
+    /// <summary>#24 (v0.13.2): cap на документы (LRU среди чистых; грязные не выталкиваются никогда — cap мягкий).</summary>
+    const int MaxDocuments = 16;
+    /// <summary>#24 (v0.13.2): чистый документ без обращений дольше этого — кандидат на вытеснение.</summary>
+    static readonly TimeSpan EvictAfterIdle = TimeSpan.FromMinutes(30);
 
     /// <summary>Подключиться к документу пути (переиспользовать существующий или открыть новый).</summary>
     /// <summary>#21: создать фантомную сессию нового файла (RAM до save); путь должен быть свободен.</summary>
     public static (Attachment Att, bool Reused) Create(string path, string content, bool createParents, string? note) {
         lock (Map) {
             PruneStale();
+            EvictIdle();
             if (Map.Count >= MaxSessions)
                 throw new ToolException(ToolException.InvalidArgs, $"{MaxSessions} sessions already open — close one");
             string canonical = System.IO.Path.GetFullPath(path);
@@ -42,6 +48,7 @@ static class Sessions {
                     $"a session for this path already exists (rev {doc.Rev}{(doc.IsNewFile ? ", created-not-yet-saved" : "")}) — " +
                     "continue editing it or close it first");
             }
+            EnforceDocCap(canonical); // #24
             var s = EditSession.CreateNew(path, content, createParents);
             ByPath[s.Path] = s;
             var first = new Attachment { Id = "s" + Guid.NewGuid().ToString("N")[..8], Doc = s, Note = note, LastSeenRev = 0 };
@@ -52,7 +59,8 @@ static class Sessions {
 
     public static (Attachment Att, bool Reused) Attach(string path, string? encoding, string? note) {
         lock (Map) {
-            PruneStale(); // #12: GC брошенных подключений до проверки лимита — живой сервер не копит мусор
+            PruneStale();
+            EvictIdle(); // #12: GC брошенных подключений до проверки лимита — живой сервер не копит мусор
             if (Map.Count >= MaxSessions)
                 throw new ToolException(ToolException.InvalidArgs, $"{MaxSessions} sessions already open — close one");
             string canonical = System.IO.Path.GetFullPath(path);
@@ -61,6 +69,7 @@ static class Sessions {
                 Map[att.Id] = att;
                 return (att, true);
             }
+            EnforceDocCap(canonical); // #24
             var s = EditSession.Open(path, encoding);
             ByPath[s.Path] = s;
             var first = new Attachment { Id = "s" + Guid.NewGuid().ToString("N")[..8], Doc = s, Note = note, LastSeenRev = 0 };
@@ -82,6 +91,41 @@ static class Sessions {
         }
     }
 
+    // ── #24 (v0.13.2): автовытеснение чистых сессий — «close влит в save» ──────────────
+    // Проверка на вызове (без таймеров): idle — осиротевшие чистые документы; cap — LRU среди чистых.
+
+    /// <summary>Осиротевший (0 подключений) чистый документ без обращений дольше EvictAfterIdle — гасим.</summary>
+    static void EvictIdle() {
+        foreach (var (path, doc) in ByPath) {
+            if (Peers(doc).Count > 0 || doc.Dirty) continue;
+            if (DateTime.UtcNow - doc.LastUsed < EvictAfterIdle) continue;
+            if (ByPath.TryRemove(path, out _)) {
+                doc.Close(false);
+                doc.Dispose();
+                SmartEdit.Mcp.Infra.Log.Info($"session:evict path={path} reason=idle (clean, no peers, >{EvictAfterIdle.TotalMinutes:0}m idle)");
+            }
+        }
+    }
+
+    /// <summary>Cap на документы: перед открытием нового выталкиваем самый давно использованный ЧИСТЫЙ (кроме открываемого). Все грязные — cap мягко превышаем.</summary>
+    static void EnforceDocCap(string exceptCanonical) {
+        while (ByPath.Count >= MaxDocuments) {
+            (string Path, EditSession Doc)? victim = null;
+            foreach (var (path, doc) in ByPath) {
+                if (path == exceptCanonical || doc.Dirty) continue;
+                if (victim is null || doc.LastUsed < victim.Value.Doc.LastUsed) victim = (path, doc);
+            }
+            if (victim is null) break; // всё грязное или открываемое — не трогаем
+            var (vpath, vdoc) = victim.Value;
+            // через существующий Detach: гасим подключения (последний гасит документ), семантика peers сохранена
+            foreach (var att in Peers(vdoc).ToList())
+                Detach(att.Id, discard: false);
+            if (ByPath.TryGetValue(vpath, out var d)) { d.Close(false); ByPath.TryRemove(vpath, out _); }
+            vdoc.Dispose();
+            SmartEdit.Mcp.Infra.Log.Info($"session:evict path={vpath} reason=cap ({MaxDocuments} documents LRU, clean)");
+        }
+    }
+
     /// <summary>
     /// v0.9 (#3): session_id ИЛИ path — инструменты принимают путь напрямую, сервер сам подключается
     /// к общему документу (переиспользуемый path-attachment "p:…"). Ритуал open умирает: правки по пути
@@ -90,6 +134,7 @@ static class Sessions {
     public static Attachment Resolve(string? sessionId, string? path) {
         if (sessionId is not null && path is not null)
             throw new ToolException("ambiguous_target", "pass either session_id or path, not both");
+        lock (Map) { PruneStale(); EvictIdle(); } // #24: гигиена на КАЖДОМ вызове — повторные вызовы тоже вытесняют (без таймеров)
         if (sessionId is not null) return Get(sessionId);
         if (string.IsNullOrEmpty(path)) throw new ToolException(ToolException.UnknownSession, "session_id or path is required");
         string canonical = System.IO.Path.GetFullPath(path);
@@ -104,8 +149,10 @@ static class Sessions {
         // не найдёт p: для переиспользования, создаст ВТОРОЕ вложение и увидит peers_dirty на свои же правки
         lock (Map) {
             PruneStale();
+            EvictIdle();
             if (Map.Count >= MaxSessions)
                 throw new ToolException(ToolException.InvalidArgs, $"{MaxSessions} sessions already open — close one");
+            EnforceDocCap(System.IO.Path.GetFullPath(path)); // #24
             var s = EditSession.Open(path, null);
             ByPath[s.Path] = s;
             var att = new Attachment { Id = "p:" + Guid.NewGuid().ToString("N")[..8], Doc = s, Note = "path", LastSeenRev = 0 };
@@ -120,8 +167,8 @@ static class Sessions {
             ? a
             : throw new ToolException(ToolException.UnknownSession, $"no session '{id}' — call open first");
 
-    /// <summary>Отметить активность подключения (liveness для stale-маркера).</summary>
-    public static void Touch(Attachment a) { a.LastSeen = DateTime.UtcNow; }
+    /// <summary>Отметить активность подключения (liveness для stale-маркера); документу тоже — часы LRU (#24).</summary>
+    public static void Touch(Attachment a) { a.LastSeen = DateTime.UtcNow; a.Doc.LastUsed = DateTime.UtcNow; }
 
     /// <summary>Все подключения документа.</summary>
     public static List<Attachment> Peers(EditSession doc) =>

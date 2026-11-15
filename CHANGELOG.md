@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.13.2 (2026-11-15)
+
+Two issues, one release train: **#23 tree(deep)** — the project map becomes the first call; **#24** — session lifecycle goes automatic. Extraction is tree-sitter (user decision 2026-11-15: the parser already ships for the gate — bases/inheritance are tree nodes, not regex surgery; old SymbolScan scanners stay for open/symbols/goto).
+
+- **`tree(deep: true)` — the default** (#23): ONE aider-style skeleton to understand a project instead of reading files whole —
+  - types with **inheritance edges resolved to anchors** (`class OpenTool : ToolBase(src/SmartEdit.Mcp/Tools/ToolBase.cs:13)`); a global simple-name index, first-wins (navigation precision, not semantics);
+  - top members with collapsed args + the first XML-doc/docstring line (`Save(force) — Saves things.`); files anchored `path:LINE` in show/replace_lines coordinates (saw it = edit it);
+  - catalogs as the repo lies (single-child chains collapse: `src/SmartEdit.Mcp`), namespace chips, `langs: cs=42 py=1 …` header, per-catalog `uses:` edges (phase 1.5: who feeds on whom);
+  - **`budget_tokens`** (default 2048, 512..8192): the skeleton is capped, the file inventory is ALWAYS complete, the tail is honest (`… +N types — raise budget_tokens | deep=false`);
+  - **auto-fallback**: `pattern`/`recent_hours` are point queries — deep steps aside, the old flat list answers; `deep:false` is the explicit opt-out;
+  - mtime+size cache per file (save bumps mtime → self-invalidating); files >2 MB keep the inventory, skip the skeleton; extractor never throws (grammar missing → empty map);
+  - works on .cs/.ts/.tsx/.js/.py today; Java/C++/markup listed but not skeletonized (their grammars don't ship — fallback is the old scanner world).
+- **Session lifecycle automated** (#24): clean documents self-evict — idle >30 min after the last touch, or over the 16-document LRU cap (eviction goes through the existing `Detach`, peers semantics intact; the journal gets `session:evict path=… reason=idle|cap`). **Dirty documents are never evicted** — unsaved work is sacred; the cap is soft when everything is dirty. Hygiene runs on every call, no timers. Path-first re-open after eviction starts fresh (rev from 0, empty undo history).
+- **`close` is hidden** (#24, manifest 20 → **19**): the ritual is dead — clean sessions auto-release (v0.8.2) and auto-evict now. By-name calls live with the deprecation wrapper; the description says it straight: *usually unnecessary — use only to force-drop YOUR unsaved edits*.
+- Surface updates: `tree` description rewritten ("Use this FIRST…"), first-call tip now leads with `tree(path)`, `help()` tool map + lifecycle lines updated, selftest's manifest check 20→19.
+- New locks: **314 selftest checks** (+30: map invariants on a deterministic mini-repo in 3 languages, repo-level edges, budget/tail, fallback, mtime cache, eviction idle/cap/never-dirty/peers/re-open/close-shadow) + smoke 67.
+- Housekeeping: `*.smartedit-bak` cleaned from the working tree.
+
 ## v0.13.1 (2026-11-15)
 
 - **Structural refactor: segments + one tool per file** (no behavior changes, tool contracts and wire format untouched):

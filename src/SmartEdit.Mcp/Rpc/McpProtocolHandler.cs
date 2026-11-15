@@ -7,7 +7,7 @@ namespace SmartEdit.Mcp.Rpc;
 
 /// <summary>Диспетчер MCP-методов: initialize, ping, tools/list, tools/call.</summary>
 public sealed class McpProtocolHandler(ToolRegistry tools) {
-    public const string ServerVersion = "0.13.1";
+    public const string ServerVersion = "0.13.2";
     public const string ProtocolVersion = "2025-06-18";
 
     /// <summary>
@@ -101,7 +101,7 @@ public sealed class McpProtocolHandler(ToolRegistry tools) {
     static CallToolResult WithFirstCallHint(CallToolResult r, string toolName) {
         if (Interlocked.Increment(ref _toolCalls) != 1 || toolName == "help") return r;
         r.Content = [.. r.Content, new TextContentDto {
-            Text = "SmartEdit tip (shown once): call help() — ONE page with the tool map, [start..end] semantics, and every error kind → exact next action.",
+            Text = "SmartEdit tip (shown once): tree(path) renders the project skeleton FIRST — types + inheritance + path:line anchors that plug straight into show/replace_lines. help() has the full tool map + every error kind → exact action.",
         }];
         return r;
     }

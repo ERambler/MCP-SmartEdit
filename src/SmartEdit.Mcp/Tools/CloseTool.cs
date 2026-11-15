@@ -4,9 +4,12 @@ using SmartEdit.Mcp.Rpc;
 
 namespace SmartEdit.Mcp.Tools;
 
-sealed class CloseTool : ToolBase {
+/// <summary>#24 (v0.13.2): close скрыт (манифест 20→19) — ритуал умер: чистые сессии авто-освобождаются (v0.8.2 не держат лок) и авто-вытесняются (#24). По имени живёт: неавтоматизируемый жест «выбросить мои несохранённые правки» + ручной вентиль.</summary>
+sealed class CloseTool : HiddenTool {
     public override string Name => "close";
-    public override string Description => "Close a session. discard=true drops unsaved edits (otherwise it refuses while dirty).";
+    public override string Description =>
+        "Usually UNNECESSARY: clean sessions auto-release the file between calls (v0.8.2) and auto-evict when idle (v0.13.2 #24) — " +
+        "nothing to close. Use ONLY to force-drop YOUR unsaved edits (discard=true; a .smartedit-shadow backup stays on disk as insurance) or as a manual pressure valve.";
     public override string InputSchemaJson => """
         {"type":"object","properties":{
           "session_id":{"type":"string","description":"from a previous response; optional if path given"},"path":{"type":"string","description":"open-by-path: skip open entirely"},

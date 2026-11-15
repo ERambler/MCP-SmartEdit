@@ -1,13 +1,13 @@
 # SmartEdit MCP
 
-**A safety-first text editor for LLM coding agents.** A zero-dependency [Model Context Protocol](https://modelcontextprotocol.io) stdio server: edits by **line number** (no byte-exact `old_string` to drift), **syntax-gated saves** (broken code never hits the disk), atomic multi-edit and multi-file transactions, undo, multi-agent collaboration — all with **range reads and diff responses**, so you never pay the whole file in tokens. Works with any MCP client: **ZCode, Claude Desktop, Cursor, Windsurf, Cline**, anything that speaks stdio MCP.
+**A safety-first text editor for LLM coding agents.** A zero-dependency [Model Context Protocol](https://modelcontextprotocol.io) stdio server: a **token-budgeted project map** (learn an architecture in one call), edits by **line number** (no byte-exact `old_string` to drift), **syntax-gated saves** (broken code never hits the disk), atomic multi-edit and multi-file transactions, undo, multi-agent collaboration — all with **range reads and diff responses**, so you never pay the whole file in tokens. Works with any MCP client: **ZCode, Claude Desktop, Cursor, Windsurf, Cline**, anything that speaks stdio MCP.
 
-[![Version](https://img.shields.io/badge/version-v0.13.1-blue)](https://github.com/ERambler/MCP-SmartEdit/releases)
+[![Version](https://img.shields.io/badge/version-v0.13.2-blue)](https://github.com/ERambler/MCP-SmartEdit/releases)
 [![CI](https://img.shields.io/badge/CI-build%2Bsmoke-green)](https://github.com/ERambler/MCP-SmartEdit/actions/workflows/ci.yml)
 [![.NET](https://img.shields.io/badge/.NET-10-purple)](https://dotnet.microsoft.com/download/dotnet/10.0)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-stdio%20server-orange)](https://modelcontextprotocol.io)
-[![Selftest](https://img.shields.io/badge/selftest-284%20checks%20ALL%20PASS-brightgreen)](#verification)
+[![Selftest](https://img.shields.io/badge/selftest-314%20checks%20ALL%20PASS-brightgreen)](#verification)
 
 ## The pain it kills
 
@@ -16,7 +16,9 @@ You gave an agent a 1500-line legacy file. It reads the whole thing (**12k token
 ```text
 built-in Edit            agent recomputes the file → old_string drifts → rejected → tokens burned
                          saves broken syntax → tests run against broken code → debug spiral
-SmartEdit                find → show → replace_lines(41..52, "...") → save → syntax_gate
+                         "understand the project" = read 6 files whole → 80k tokens before line 1 is edited
+SmartEdit                tree(path) → ONE token-budgeted skeleton: types, inheritance, path:line anchors
+                         find → show → replace_lines(41..52, "...") → save → syntax_gate
                          nothing to mismatch; broken code is REFUSED at the disk boundary
 ```
 
@@ -31,6 +33,7 @@ SmartEdit                find → show → replace_lines(41..52, "...") → save
 | last writer wins — silent clobber | named-offender conflicts, provably-safe auto-recovery, `peers_dirty`, cross-process mutex |
 | no undo, no audit | **undo** (undo×2 = redo), shared journal every agent can grep |
 | one edit at a time | atomic `edit_batch` (200 edits), multi-file transactions, replayable **recipes** |
+| "understand the codebase" = whole-file reads | **`tree(deep)`** — one token-budgeted skeleton: types + inheritance edges `Base(file:line)` + top members, exact `path:line` anchors |
 
 ## Token economy — the honest version
 
@@ -38,6 +41,7 @@ What actually saves tokens on large files:
 
 - **Range reads instead of whole-file reads**: `show(start, end, max_chars)` reads exactly the lines you edit. Editing line 4500 of a 10k-line file never pays for lines 1–4499.
 - **`find` returns edit-ready spans**: hits carry a `span {start, end}` + snippet — you edit the span directly, no follow-up `show` round-trip.
+- **`tree(deep)` — the orientation pass in one call** (v0.13.2): an aider-style project skeleton instead of reading files whole — types with inheritance edges (`ToolBase(src/…/ToolBase.cs:13)`), top members with doc lines, `path:line` anchors in `show`/`replace_lines` coordinates. `budget_tokens` caps the skeleton (default 2048); the file inventory is always complete and the tail is honest (`… +N types`). Parsed by the same built-in tree-sitter the gate uses; mtime-cached (warm re-render ≈ ms).
 - **`code_outline` rides along with `open`**: top-50 symbols with line numbers for files ≤5k lines — the "read the tree → read the file" ceremony collapses into one call.
 - **Diff responses**: every mutation returns a unified diff (±3 lines context), not the file.
 - **`replace_content`**: exact-text anchors, no line math → fewer failed calls, fewer re-reads.
@@ -53,13 +57,16 @@ How to verify instead of trusting us: tokens-per-task (SmartEdit vs your built-i
 2. **Anchors against your own wrong math**: `expect_old` (exact current text of the range) catches miscounted lines *before* the edit applies; `ambiguous_match`/`not_found` make text anchors unambiguous.
 3. **Atomicity**: `edit_batch` — 200 edits, all validated before any apply, bottom-up (no shift math); `edit_transaction` — the same across files; `recipe_apply` — replay a saved refactor across N files with locate-all-then-apply semantics (divergence = precise report, nothing touched).
 4. **Recovery**: stale-rev auto-recovery re-applies your edit *only when provably safe* (anchor intact or range untouched, shifts tracked); otherwise a structured `stale_conflict` with the current text and a retry hint. `undo` — compensating mutations, peer-safe.
-5. **Collaboration guards**: one document per path, peers listed in `open`, conflicting edits name the offender, `peers_dirty` on save, cross-process mutex (two servers never clobber each other), a DIRTY file is OS-protected from external writes until you save.
+5. **Collaboration guards**: one document per path, peers listed in `open`, conflicting edits name the offender, `peers_dirty` on save, cross-process mutex (two servers never clobber each other), a DIRTY file is OS-protected from external writes until you save. **Lifecycle is automatic** (v0.13.2): clean sessions never hold files between calls and self-evict when idle (30 min) or over the 16-document LRU cap — dirty ones are never evicted; `close` is a hidden manual valve, not a ritual.
 6. **File birth inside the gate** (v0.12): `create(path, content)` — a phantom RAM session, nothing on disk until `save`, advisory syntax check of the seed right in the response, first save gates hard.
 7. **Crash safety**: save = temp file + atomic rename (+ `.smartedit-bak`); unsaved work is shadowed to disk; encodings (cp1251/UTF-16) round-trip — `save` keeps the original encoding by default.
 
 ## The 60-second tour
 
 ```jsonc
+tree(path: "C:\\src\\project")                                  // FIRST: skeleton, inheritance, path:line anchors
+// -> { deep: true, map: "src/app (38 files, 8.6K ln)\n  Core/EditSession.cs:7 [1032]…" }
+
 // path-first: no open ceremony, every tool takes path directly
 show(path: "C:\\src\\BigFile.cs", start: 41, end: 52)          // range read, numbered lines
 find(path, regex: "EditSession\\(", context: 2)                 // hits with spans → edit without re-reading
@@ -139,7 +146,7 @@ Downloads the latest release to `%LOCALAPPDATA%\SmartEdit\bin`, runs the selftes
 
 ## Verification
 
-- **284 selftest checks** (exit 0/1, CI gate on every push): five-language literal fixtures, anchored diagnostics, stale-recovery scenarios, save-torture (byte-exact disk verification after every save), the piece-table corruption regression, `create` semantics, encodings, collaboration, undo, 300 MB big-file flow, full protocol round-trip, corpus fuzz (every repo .cs file must pass the audit).
+- **314 selftest checks** (exit 0/1, CI gate on every push): five-language literal fixtures, anchored diagnostics, stale-recovery scenarios, save-torture (byte-exact disk verification after every save), the piece-table corruption regression, `create` semantics, encodings, collaboration, undo, session-eviction locks (idle/cap/never-dirty/re-open), tree-map locks (inheritance edges, budget tail, auto-fallback, mtime cache), 300 MB big-file flow, full protocol round-trip, corpus fuzz (every repo .cs file must pass the audit).
 - **67 live smoke checks** (~1 s, CI gate on build *and* on the published release binary): real server over stdio, every tool happy-path + edges, plus a **drunk-LLM pack** — wrong line math, ancient revs, hallucinated session ids, garbage-typed args, 50K-char edits, double-edits. The server must help, not crash.
 - Per-call milliseconds are written to the shared journal — audit performance yourself.
 
@@ -147,6 +154,9 @@ Downloads the latest release to `%LOCALAPPDATA%\SmartEdit\bin`, runs the selftes
 
 Brief — the full history lives in [CHANGELOG.md](CHANGELOG.md).
 
+- **v0.13.2** — **`tree(deep)`**: the project map is the first call (tree-sitter skeleton, inheritance edges `Base(file:line)`, `path:line` anchors, token budget); session lifecycle automated (idle/cap auto-evict, dirty never); `close` hidden — manifest **19 tools**
+- **v0.13.1** — structural refactor: segments (Core/Rpc/Tools/Infra/Testing), one tool = one class = one file, `ToolBase`
+- **v0.13.0** — deprecation wave #22 phase 1: 7 zero-use tools hidden from `tools/list` (27→20), by-name calls live with a wrapper
 - **v0.12** — `create()`: file birth inside the syntax gate (phantom RAM session, disk untouched until save)
 - **v0.11** — `recipe_save`/`recipe_apply` (replayable refactors, `{{param}}` anchors); attention tracking (`blind` warnings on unseen-range edits); **#19 root cause fixed** (piece-table slice reads — every path now sees the same document, locked by regression tests)
 - **v0.10** — built-in **tree-sitter syntax gate** on save (.cs/.js/.ts/.tsx/.py/.sh); live smoke suite in CI
@@ -156,7 +166,7 @@ Brief — the full history lives in [CHANGELOG.md](CHANGELOG.md).
 
 ## Roadmap
 
-Deprecation wave in flight: 7 zero-use tools leave `tools/list` (issue #22, telemetry-driven). Next candidates: cross-platform single-file builds, a public tokens-per-edit benchmark vs built-in editors. Known limits: Python indentation slips past the gate; HTML is not gated (lenient by nature); Windows-first distribution.
+Manifest is 19 tools: 8 hidden ones (7 zero-use #22 + `close` #24) still answer by name with a deprecation wrapper; phase 2 deletes them by telemetry. Map phase 2: cross-language anchors (API routes ↔ handlers ↔ `fetch` sites, tables ↔ models) — string anchors, no LSP. Next: a public tokens-per-task benchmark vs built-in editors. Known limits: Python indentation slips past the gate; HTML is not gated (lenient by nature); Windows-first distribution.
 
 ## License
 
