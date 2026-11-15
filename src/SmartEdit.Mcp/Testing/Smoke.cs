@@ -7,7 +7,7 @@ namespace SmartEdit.Mcp;
 
 /// <summary>
 /// #20: живые смоки ЗАПУЩЕННОГО сервера. Поднимает дочерний процесс (этот же exe, серверный режим)
-/// и прогоняет каждый инструмент happy-path'ом и краевыми, плюс пакет «пьяная нейронка» —
+/// и прогоняет каждый инструмент happy-path'ом и краевыми, плюс пакет drunk-LLM —
 /// сервер обязан помогать (внятные ошибки, якоря, авто-recovery), а не портить документ.
 /// Отчёт: именованные чеки, провалы с expected/got, время прогона; exit 0/1. Весь прогон &lt; 15 с.
 /// </summary>
@@ -219,7 +219,7 @@ public static class Smoke {
             r = await Tool("save", new { path = P("broken.cs") });
             Check("create: первый save блокирует битый файл", ErrKind(r) == "syntax_gate" && !File.Exists(P("broken.cs")));
 
-            // ── C. пьяная нейронка ────────────────────────────────────────────
+            // ── C. drunk LLM ────────────────────────────────────────────
             Console.WriteLine("C. drunk LLM");
             Write("drunk.cs", "class D {\n    int A = 1;\n    int B = 2;\n    int C = 3;\n}\n");
             string before = File.ReadAllText(P("drunk.cs"));
@@ -254,7 +254,7 @@ public static class Smoke {
             r = await Tool("replace_content", new { path = P("drunk.cs"), find = "    int B = 22;", replace = "    int B = 22;" });
             Check("drunk: идентичная замена не порет (но-op/ошибка)", IsErr(r) || ResultText(r).Contains("nothing") || true);
             // защита базы (v0.8.2): пока правки не сохранены, ВНЕШНЯЯ запись в файл блокируется ОС —
-            // bash/нейронка не затрут несохранённую работу (disk_conflict-путь покрыт selftest MtimeConflict)
+            // bash/агент не затрут несохранённую работу (disk_conflict-путь покрыт selftest MtimeConflict)
             Write("conf.cs", "one\ntwo\n");
             r = await Tool("replace_lines", new { path = P("conf.cs"), start = 1, end = 1, new_text = "uno" });
             bool blocked = false;

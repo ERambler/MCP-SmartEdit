@@ -45,7 +45,7 @@ sealed class ReplaceContentTool : ToolBase {
         int expectedRev = args.GetInt("expected_rev", att.LastSeenRev);
         string[] fl = find.Replace("\r\n", "\n").Split('\n');
         string[] rl = replace.Replace("\r\n", "\n").Split('\n');
-        int scopeFrom = Math.Max(1, args.GetInt("start_line", 1));   // v0.9.3 (Gemini): сужение скопа для бойлерплейта
+        int scopeFrom = Math.Max(1, args.GetInt("start_line", 1));   // v0.9.3: сужение скопа для бойлерплейта
         int scopeTo = args.GetInt("end_line", 0);                     // 0 = до конца файла
 
         var outcome = await LockedAsync(s, () => {

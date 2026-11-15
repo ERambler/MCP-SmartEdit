@@ -18,7 +18,7 @@ if (args.Length > 0 && args[0] == "selftest")
     return await SmartEdit.Mcp.SelfTest.RunAsync();
 
 // SmartEdit.Mcp.exe smoke → живые смоки ЗАПУЩЕННОГО сервера (#20): транспорт + все инструменты +
-// пакет «пьяная нейронка»; <15с, отчёт с expected/got, exit 0/1
+// пакет drunk-LLM; <15с, отчёт с expected/got, exit 0/1
 if (args.Length > 0 && args[0] == "smoke") {
     Environment.SetEnvironmentVariable("SMARTEDIT_NO_UPDATE_CHECK", "1");
     // AOT: smoke-клиент сериализует запросы рефлексией (анонимные типы) — без dynamic кода он не работает;

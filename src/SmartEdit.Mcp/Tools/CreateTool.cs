@@ -4,7 +4,7 @@ using SmartEdit.Mcp.Rpc;
 
 namespace SmartEdit.Mcp.Tools;
 
-/// <summary>#21 (консилиум 2026-11-14): рождение файла внутри SmartEdit — RAM до save, гейт участвует.</summary>
+/// <summary>#21 (дизайн-ревью 2026-11-14): рождение файла внутри SmartEdit — RAM до save, гейт участвует.</summary>
 sealed class CreateTool : ToolBase {
     public override string Name => "create";
     public override string Description =>
