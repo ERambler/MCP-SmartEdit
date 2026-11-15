@@ -160,9 +160,9 @@ Brief — the full history lives in [CHANGELOG.md](CHANGELOG.md).
 - **v0.13.3** — `tree(deep)` polish: own junk (`.smartedit-bak` etc.) never in the map, trivial DTO props folded out of the skeleton budget, deep response carries no dead fields
 - **v0.13.2** — **`tree(deep)`**: the project map is the first call (tree-sitter skeleton, inheritance edges `Base(file:line)`, `path:line` anchors, token budget); session lifecycle automated (idle/cap auto-evict, dirty never); `close` hidden — manifest **19 tools**
 - **v0.13.1** — structural refactor: segments (Core/Rpc/Tools/Infra/Testing), one tool = one class = one file, `ToolBase`
-- **v0.13.0** — deprecation wave #22 phase 1: 7 zero-use tools hidden from `tools/list` (27→20), by-name calls live with a wrapper
+- **v0.13.0** — deprecation wave #32 phase 1: 7 zero-use tools hidden from `tools/list` (27→20), by-name calls live with a wrapper
 - **v0.12** — `create()`: file birth inside the syntax gate (phantom RAM session, disk untouched until save)
-- **v0.11** — `recipe_save`/`recipe_apply` (replayable refactors, `{{param}}` anchors); attention tracking (`blind` warnings on unseen-range edits); **#19 root cause fixed** (piece-table slice reads — every path now sees the same document, locked by regression tests)
+- **v0.11** — `recipe_save`/`recipe_apply` (replayable refactors, `{{param}}` anchors); attention tracking (`blind` warnings on unseen-range edits); **#29 root cause fixed** (piece-table slice reads — every path now sees the same document, locked by regression tests)
 - **v0.10** — built-in **tree-sitter syntax gate** on save (.cs/.js/.ts/.tsx/.py/.sh); live smoke suite in CI
 - **v0.9** — path-first API (the `open` ritual is dead); multi-file `edit_transaction`; cross-process mutex; `replace_content`; corpus fuzz
 - **v0.8** — honest literal-aware bracket diagnostics in every edit response; `help`; clean sessions never hold files
@@ -170,7 +170,7 @@ Brief — the full history lives in [CHANGELOG.md](CHANGELOG.md).
 
 ## Roadmap
 
-Manifest is 19 tools: 8 hidden ones (7 zero-use #22 + `close` #24) still answer by name with a deprecation wrapper; phase 2 deletes them by telemetry. Map phase 2: cross-language anchors (API routes ↔ handlers ↔ `fetch` sites, tables ↔ models) — string anchors, no LSP. Next: a public tokens-per-task benchmark vs built-in editors. Known limits: Python indentation slips past the gate; HTML is not gated (lenient by nature); Windows-first distribution.
+Manifest is 19 tools: 8 hidden ones (7 zero-use #32 + `close` #34) still answer by name with a deprecation wrapper; phase 2 deletes them by telemetry. Map phase 2: cross-language anchors (API routes ↔ handlers ↔ `fetch` sites, tables ↔ models) — string anchors, no LSP. Next: a public tokens-per-task benchmark vs built-in editors. Known limits: Python indentation slips past the gate; HTML is not gated (lenient by nature); Windows-first distribution.
 
 ## License
 

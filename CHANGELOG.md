@@ -2,18 +2,18 @@
 
 ## v0.13.3 (2026-11-15)
 
-**#25: tree(deep) polish** — три шероховатости, найденные живым A/B-пилотом v0.13.2 на собственном репо (73 файла). Один заезд, без смены контрактов.
+**#35: tree(deep) polish** — three rough edges found by a live A/B pilot of v0.13.2 on this very repo (73 files). One pass, no contract changes.
 
-- **Собственный мусор не попадает в карту**: ProjectScanner скипает `*.smartedit-bak` / `*.smartedit-shadow` / `*.smartedit-tmp` (как .gitignore) — save-бэкапы, созданные во время живой правки, больше не висят в скелете и не считаются «языком» (`smartedit-bak=2` в цензе).
-- **Тривиальные DTO-пропы не едят бюджет скелета**: интересный член = метод/ctor/def, или с doc, или не-DTO поле/проп. Тривиальные (имена из DTO-джентльменского набора: Name/Description/Rev/TotalLines/Diffs/…, или тип — чистый DTO без единого метода) сворачиваются в хвост `… +N`. Бонус формата: методы теперь всегда со скобками — `Count()` видно как поведение, а не поле.
-- **Deep-ответ без мёртвых полей**: `groups` не сериализуется (карта сама и есть перепись), `totalBytes` честный из сканера (0 выглядел ошибкой).
-- Замки (+5, итого **319**): bak-мусор в дереве, свёртка чистого DTO, doc-метод показан + тривиальный проп свёрнут, сырой deep-JSON без `groups` и с честным `totalBytes`.
+- **The map no longer shows its own litter**: ProjectScanner skips `*.smartedit-bak` / `*.smartedit-shadow` / `*.smartedit-tmp` (mirroring .gitignore) — save-backups created during live editing no longer hang in the skeleton or count as a "language" (`smartedit-bak=2` in the census).
+- **Trivial DTO properties no longer eat the skeleton budget**: an interesting member = a method/ctor/def, or has a doc, or is a non-DTO field/prop. Trivial ones (names from the DTO boilerplate set: Name/Description/Rev/TotalLines/Diffs/…, or a type that is a pure DTO without a single method) fold into the `… +N` tail. Format bonus: methods now always render with parentheses — `Count()` reads as behavior, not a field.
+- **Deep response without dead fields**: `groups` is not serialized (the map IS the inventory), `totalBytes` is honest from the scanner (0 looked like an error).
+- Locks (+5, total **319**): bak litter in the tree, pure-DTO folding, doc-method shown + trivial prop folded, raw deep-JSON without `groups` and with honest `totalBytes`.
 
 ## v0.13.2 (2026-11-15)
 
-Two issues, one release train: **#23 tree(deep)** — the project map becomes the first call; **#24** — session lifecycle goes automatic. Extraction is tree-sitter (user decision 2026-11-15: the parser already ships for the gate — bases/inheritance are tree nodes, not regex surgery; old SymbolScan scanners stay for open/symbols/goto).
+Two issues, one release train: **#33 tree(deep)** — the project map becomes the first call; **#34** — session lifecycle goes automatic. Extraction is tree-sitter (decision 2026-11-15: the parser already ships for the gate — bases/inheritance are tree nodes, not regex surgery; old SymbolScan scanners stay for open/symbols/goto).
 
-- **`tree(deep: true)` — the default** (#23): ONE aider-style skeleton to understand a project instead of reading files whole —
+- **`tree(deep: true)` — the default** (#33): ONE aider-style skeleton to understand a project instead of reading files whole —
   - types with **inheritance edges resolved to anchors** (`class OpenTool : ToolBase(src/SmartEdit.Mcp/Tools/ToolBase.cs:13)`); a global simple-name index, first-wins (navigation precision, not semantics);
   - top members with collapsed args + the first XML-doc/docstring line (`Save(force) — Saves things.`); files anchored `path:LINE` in show/replace_lines coordinates (saw it = edit it);
   - catalogs as the repo lies (single-child chains collapse: `src/SmartEdit.Mcp`), namespace chips, `langs: cs=42 py=1 …` header, per-catalog `uses:` edges (phase 1.5: who feeds on whom);
@@ -21,8 +21,8 @@ Two issues, one release train: **#23 tree(deep)** — the project map becomes th
   - **auto-fallback**: `pattern`/`recent_hours` are point queries — deep steps aside, the old flat list answers; `deep:false` is the explicit opt-out;
   - mtime+size cache per file (save bumps mtime → self-invalidating); files >2 MB keep the inventory, skip the skeleton; extractor never throws (grammar missing → empty map);
   - works on .cs/.ts/.tsx/.js/.py today; Java/C++/markup listed but not skeletonized (their grammars don't ship — fallback is the old scanner world).
-- **Session lifecycle automated** (#24): clean documents self-evict — idle >30 min after the last touch, or over the 16-document LRU cap (eviction goes through the existing `Detach`, peers semantics intact; the journal gets `session:evict path=… reason=idle|cap`). **Dirty documents are never evicted** — unsaved work is sacred; the cap is soft when everything is dirty. Hygiene runs on every call, no timers. Path-first re-open after eviction starts fresh (rev from 0, empty undo history).
-- **`close` is hidden** (#24, manifest 20 → **19**): the ritual is dead — clean sessions auto-release (v0.8.2) and auto-evict now. By-name calls live with the deprecation wrapper; the description says it straight: *usually unnecessary — use only to force-drop YOUR unsaved edits*.
+- **Session lifecycle automated** (#34): clean documents self-evict — idle >30 min after the last touch, or over the 16-document LRU cap (eviction goes through the existing `Detach`, peers semantics intact; the journal gets `session:evict path=… reason=idle|cap`). **Dirty documents are never evicted** — unsaved work is sacred; the cap is soft when everything is dirty. Hygiene runs on every call, no timers. Path-first re-open after eviction starts fresh (rev from 0, empty undo history).
+- **`close` is hidden** (#34, manifest 20 → **19**): the ritual is dead — clean sessions auto-release (v0.8.2) and auto-evict now. By-name calls live with the deprecation wrapper; the description says it straight: *usually unnecessary — use only to force-drop YOUR unsaved edits*.
 - Surface updates: `tree` description rewritten ("Use this FIRST…"), first-call tip now leads with `tree(path)`, `help()` tool map + lifecycle lines updated, selftest's manifest check 20→19.
 - New locks: **314 selftest checks** (+30: map invariants on a deterministic mini-repo in 3 languages, repo-level edges, budget/tail, fallback, mtime cache, eviction idle/cap/never-dirty/peers/re-open/close-shadow) + smoke 67.
 - Housekeeping: `*.smartedit-bak` cleaned from the working tree.
@@ -39,9 +39,9 @@ Two issues, one release train: **#23 tree(deep)** — the project map becomes th
 
 ## v0.13.0 (2026-11-14)
 
-- **Deprecation wave #22, phase 1** (telemetry-driven: 7 tools, 0 live calls in ~1800): `symbols`, `calc`, `convert`, `sync`, `help`, `sessions`, `edit_transaction` are **hidden from `tools/list`** — the manifest shrinks 27 → 20. Nothing is deleted:
+- **Deprecation wave #32, phase 1** (telemetry-driven: 7 tools, 0 live calls in ~1800): `symbols`, `calc`, `convert`, `sync`, `help`, `sessions`, `edit_transaction` are **hidden from `tools/list`** — the manifest shrinks 27 → 20. Nothing is deleted:
   - calling a hidden tool BY NAME still works — the response is wrapped in `{deprecated:true, note:"…migrate now", result:<original>}` and the shared journal logs `deprecated:name` (phase 2 in v0.13+ will delete by this telemetry);
-  - safety net is deliberate (consilium): `undo` (4 calls) and `check` (15) stay visible — frequency is not the metric for insurance;
+  - safety net is deliberate (design review): `undo` (4 calls) and `check` (15) stay visible — frequency is not the metric for insurance;
   - `edit_transaction` mechanics remain the engine inside `recipe_apply` — only the public duplicate is hidden.
 - Mechanism: `ITool.Hidden` (default-interface member, false), `HiddenTool` base class for the 7, `ToolRegistry` filters the manifest and wraps hidden calls; unknown-tool errors now list only visible names.
 ## v0.12.1 (2026-11-14)
@@ -54,23 +54,23 @@ Two issues, one release train: **#23 tree(deep)** — the project map becomes th
 - `exe smoke` under Native AOT prints an honest refusal (reflection JSON needs dynamic code; `selftest` runs fully everywhere).
 ## v0.12.0 (2026-11-14)
 
-- **`create` (#21, consilium 2026-11-14)**: file birth INSIDE SmartEdit — `create(path, content?, create_parents?, attention?)` opens a phantom RAM session over a not-yet-existing path; **nothing touches disk until `save`** (shadow insurance included). The syntax gate finally attends the birth of code:
+- **`create` (#31, design review 2026-11-14)**: file birth INSIDE SmartEdit — `create(path, content?, create_parents?, attention?)` opens a phantom RAM session over a not-yet-existing path; **nothing touches disk until `save`** (shadow insurance included). The syntax gate finally attends the birth of code:
   - advisory parse of the seed right in the create response (`gate: new_errors` + `gateErrors[]` — instant feedback, non-blocking);
-  - the FIRST save gates hard (empty baseline = every syntax error is NEW; fix in RAM, save once; `force=true` is the conscious override) — the consilium kept the gate strict (R1's verdict);
+  - the FIRST save gates hard (empty baseline = every syntax error is NEW; fix in RAM, save once; `force=true` is the conscious override) — the design review kept the gate strict;
   - existing file or live session on the path → `already_exists` (create never truncates); file appearing between create and save → `create_conflict` (no clobber; force overwrites);
   - missing parent dirs → `parent_missing` with a hint, or `create_parents:true` (dirs created at save — disk-philosophy preserved); new files are UTF-8 no BOM; NUL bytes and >2MB seeds rejected; cross-process mutex covers phantom paths too.
-  - Rejected by the consilium: BASIC-style `open` modes (write/append bypass the gate and break RAM-staging), implicit auto-create in edits (garbage files from path typos), a separate append tool (`insert_after(totalLines)` exists).
+  - Rejected in review: BASIC-style `open` modes (write/append bypass the gate and break RAM-staging), implicit auto-create in edits (garbage files from path typos), a separate append tool (`insert_after(totalLines)` exists).
 - Fix: PieceTable with a zero-line base (create's empty phantom) no longer emits a phantom base piece (IndexOutOfRange in BasePieceSpan).
 - `open` on a missing file now hints `create(path, content?)`.
 - Tools: 26 → 27; help() covers create; smoke +6 checks (phantom/already_exists/broken-seed advisory + first-save block). **284 selftest checks ALL PASS, 67 smoke checks 0.9s**.
 ## v0.11.2 (2026-11-14)
 
-- **Live smoke suite (#20)**: `SmartEdit.Mcp.exe smoke` spawns the real server over stdio JSON-RPC and pokes every tool (happy + edges) plus a **drunk-LLM pack** (wrong line math caught by expect_old, ancient revs auto-recover, hallucinated session ids, garbage-typed args, 50K-char edits, emoji regexes, double-edits, dirty-file protection). Report names every failing check with expected/got; exit 0/1. **61 checks, 0.9s**. Wired into CI: build-test job + release job (runs on the PUBLISHED binary).
+- **Live smoke suite (#30)**: `SmartEdit.Mcp.exe smoke` spawns the real server over stdio JSON-RPC and pokes every tool (happy + edges) plus a **drunk-LLM pack** (wrong line math caught by expect_old, ancient revs auto-recover, hallucinated session ids, garbage-typed args, 50K-char edits, emoji regexes, double-edits, dirty-file protection). Report names every failing check with expected/got; exit 0/1. **61 checks, 0.9s**. Wired into CI: build-test job + release job (runs on the PUBLISHED binary).
 - **CI zip fixed**: the release asset packed only the exe — without the tree-sitter grammar dlls the syntax gate silently degraded (off_no_grammar) for every installed user. Zip now includes `tree-sitter*.dll`.
 - Smoke-engine findings on the way: unread child stderr pipe deadlocks the server at 4KB (drained now); `initialize`/`tools/list` are plain-object results (checks use raw responses).
 ## v0.11.1 (2026-11-14)
 
-- **#19 CRITICAL fixed — root cause, not a band-aid**: an insert piece can reference a SLICE of its buffer (any later edit inside a previously inserted block splits the piece: head/tail pieces carry FirstLine>0). Two read paths ignored that:
+- **#29 CRITICAL fixed — root cause, not a band-aid**: an insert piece can reference a SLICE of its buffer (any later edit inside a previously inserted block splits the piece: head/tail pieces carry FirstLine>0). Two read paths ignored that:
   - `GetLineText` read `SpanOf(buffer, inPiece)` without `p.FirstLine` → after a split, view/anchors/locator saw WRONG buffer lines (the "show displays text not in the file" anomaly, and the interleaved view);
   - `StreamContent`/`ContentLength` dumped the WHOLE buffer per piece → save wrote duplicated content to disk (the 369-vs-322 incident).
   Fix: piece-aware spans everywhere (`FirstLine + inPiece` for reads; `InsertPieceSpan` slice for stream/length) — the invariant "every read path sees the same logical document" now holds by construction. Repro'd by a minimal dump (piece `FirstLine=4` returning buffer lines 0-1), locked by 7 selftest checks (view per-line, disk == view CHARACTER-EXACT after replace_all inside an insert, BytesWritten/ContentLength == real file size, re-open identity) — **266 checks ALL PASS**.
@@ -85,10 +85,10 @@ Two issues, one release train: **#23 tree(deep)** — the project map becomes th
 
 ## v0.10.0 (2026-11-13)
 
-- **Built-in tree-sitter syntax gate (#18, consilium 2026-11-13)**: `save` on `.cs .js .ts .tsx .py .sh` is blocked with `syntax_gate` if the edit introduced **NEW** syntax errors vs baseline — the number-one real-world failure class (agent breaks code, saves, walks away). Design per the three-voice verdict (Gemini-argon + R1 + Google):
+- **Built-in tree-sitter syntax gate (#28, design review 2026-11-13)**: `save` on `.cs .js .ts .tsx .py .sh` is blocked with `syntax_gate` if the edit introduced **NEW** syntax errors vs baseline — the number-one real-world failure class (agent breaks code, saves, walks away). Design per the review verdict:
   - **Fingerprint-matched baseline, not coordinates**: pre-existing errors never block; a shifted/moved error is not "new". Baseline = text at open (lazily, on first gated save), refreshed to the saved text after every successful save; `check` never touches it; external-change reset rebuilds it.
   - **`missing` diagnostics name the absent token** (`;`, `)`, `fi`) — 1-based row/col, `gateErrors[]` in every save result (`gate: pass|forced|off|degraded|skipped_too_large|off_disabled|off_no_grammar`).
-  - **Degradation is explicit, never silent**: parse budget 1.5 s; timeout/crash → `syntax_gate_degraded` block with the `force` escape hatch (a silent pass would be a hole — R1's verdict); 3 consecutive strikes auto-disable that language's gate until restart.
+  - **Degradation is explicit, never silent**: parse budget 1.5 s; timeout/crash → `syntax_gate_degraded` block with the `force` escape hatch (a silent pass would be a hole — review verdict); 3 consecutive strikes auto-disable that language's gate until restart.
   - **Engine**: [TreeSitter.DotNet](https://www.nuget.org/packages/TreeSitter.DotNet) (MIT), grammars load lazily per language (~ms; first gated save pays once). Signal = collected ERROR/MISSING nodes; root `HasError` is ignored — the C# grammar flags phantom error-states on valid collection-initializer constructs (corpus finding). No plugins, no Node, no Roslyn; nothing is downloaded at runtime.
   - **Honest limits**: Python indentation errors slip through (grammar-tolerant); HTML not gated (lenient by nature); cascade errors (fixing a brace "uncovers" older ones) may block — `force` is the documented escape.
 - **Distribution**: publish pruned from ~590 MB of all-platform grammars to win-x64 + 7 grammars ≈ **13 MB** (exe + `tree-sitter*.dll` set). The library is a NuGet dependency — nothing vendored into the repo.
@@ -96,16 +96,16 @@ Two issues, one release train: **#23 tree(deep)** — the project map becomes th
 
 ## v0.9.3 (2026-11-13)
 
-- **`unsaved` nag in every response** (consilium round 2 — Claude's #1 pain, Gemini concurred): the agent edits, forgets `save`, runs tests via bash → tests see the OLD disk code → debug spiral. Now every edit/show response on a dirty document carries `unsaved: true` (transactions report `unsavedFiles: N`) — the nag rides along until you save
-- **`replace_content` scope bounds** (Gemini): optional `start_line`/`end_line` narrow the uniqueness scope — the boilerplate antidote (don't extend the snippet, bound it); `ambiguous_match` now suggests the bounds
-- **`server_version` in every error payload** (R1): a legacy binary in the field is visible in the error itself — the v0.7.2 stale-save class becomes operationally diagnosable
+- **`unsaved` nag in every response** (review round 2 — the top-ranked field pain): the agent edits, forgets `save`, runs tests via bash → tests see the OLD disk code → debug spiral. Now every edit/show response on a dirty document carries `unsaved: true` (transactions report `unsavedFiles: N`) — the nag rides along until you save
+- **`replace_content` scope bounds** (review note): optional `start_line`/`end_line` narrow the uniqueness scope — the boilerplate antidote (don't extend the snippet, bound it); `ambiguous_match` now suggests the bounds
+- **`server_version` in every error payload** (review verdict): a legacy binary in the field is visible in the error itself — the v0.7.2 stale-save class becomes operationally diagnosable
 - **Path-mode peers_dirty bug (found by our own new test)**: a fresh path-document got an `s:`-attachment instead of `p:`, so the SECOND path call created a duplicate attachment and `save` saw its own edits as peers. New documents now open with the reusable `p:` id from the start
 - Selftests: +6 (nag chain, scope bounds, unsavedFiles, server_version in payload) — 237 total, ALL PASS
 
 ## v0.9.2 (2026-11-13)
 
-- **Cross-process coordination (#16, consilium Gemini+R1)**: two SmartEdit instances on the same file used to fight silently — the second's save hit an opaque EBUSY (or worse, clobbered). Now every document holds a named mutex on its canonical path for its lifetime; the second process gets an explicit `cross_process_lock` error at first touch, pointing to the shared journal for pids. Crashed owner → mutex auto-recovered (AbandonedMutexException handled)
-- **Corpus fuzz of the lexer (consilium)**: the selftest now scans ALL ~39 .cs files of this repo (fixtures inside strings included) and requires ZERO false bracket diagnostics — the "boy who cried wolf" reflex from the field report is now a locked regression, not weather
+- **Cross-process coordination (#26, design review)**: two SmartEdit instances on the same file used to fight silently — the second's save hit an opaque EBUSY (or worse, clobbered). Now every document holds a named mutex on its canonical path for its lifetime; the second process gets an explicit `cross_process_lock` error at first touch, pointing to the shared journal for pids. Crashed owner → mutex auto-recovered (AbandonedMutexException handled)
+- **Corpus fuzz of the lexer** (review verdict): the selftest now scans ALL ~39 .cs files of this repo (fixtures inside strings included) and requires ZERO false bracket diagnostics — the "boy who cried wolf" reflex from the field report is now a locked regression, not weather
 - Selftests: +3 (cross-process lock/open-after-release, corpus) — 231 total, ALL PASS
 
 ## v0.9.1 (2026-11-13)
@@ -130,7 +130,7 @@ Two issues, one release train: **#23 tree(deep)** — the project map becomes th
 
 ## v0.8.1 (2026-11-12) (2026-11-12)
 
-- **`help` tool — self-documenting API** (consilium: "the cheapest token win — one call instead of 5 rounds of reverse-engineering"): one compact page with the tool map, `[start..end]` semantics, the rev protocol, and every error kind → exact next action. Plus a one-time invitation: `initialize` instructions point to it, and the FIRST tools/call of a process gets a second content block with the tip (never again in that session)
+- **`help` tool — self-documenting API** (review verdict: "the cheapest token win — one call instead of 5 rounds of reverse-engineering"): one compact page with the tool map, `[start..end]` semantics, the rev protocol, and every error kind → exact next action. Plus a one-time invitation: `initialize` instructions point to it, and the FIRST tools/call of a process gets a second content block with the tip (never again in that session)
 - **(#1) Structured retry + unified error envelope**: every error payload now echoes `session_id` and carries machine-actionable `retry: {strategy: reissue_with_rev|reanchor|reread_range, start?, end?}` alongside the prose hint
 - **(#2) `code_outline` honesty**: open responses add `code_outline_total` + `code_outline_truncated` — the agent always knows whether it saw the whole file or just the top-50
 - **(#3) `find` span**: each hit with a snippet carries `span: {start, end}` — edit that range directly, no follow-up `show` round-trip
@@ -138,7 +138,7 @@ Two issues, one release train: **#23 tree(deep)** — the project map becomes th
 
 ## v0.8.0 (2026-11-11)
 
-- **Universal literal lexer** (consilium-designed): ONE core + per-language profiles — C# raw `"""`/`$$"""`, Python triple/f-strings, JS template literals with nested `${}`, Java text blocks, C++ `R"delim(...)delim"`. Brackets stop lying about string contents; interpolation-hole code keeps its real braces (context stack for nested forms)
+- **Universal literal lexer** (review-designed): ONE core + per-language profiles — C# raw `"""`/`$$"""`, Python triple/f-strings, JS template literals with nested `${}`, Java text blocks, C++ `R"delim(...)delim"`. Brackets stop lying about string contents; interpolation-hole code keeps its real braces (context stack for nested forms)
 - **Structured `diagnostics` in every edit response**: `[{line, code, message}]` with machine codes (`bracket_mismatch`, `never_closed`, `stray_closer`, `unterminated_literal/comment/hole`); unterminated literals anchor at the OPENING line
 - **`retry_on_stale` defaults to true** — provably-safe stale-rev recovery without asking
 
@@ -201,7 +201,7 @@ Two issues, one release train: **#23 tree(deep)** — the project map becomes th
 - **`log(tail/grep/level/errors_only)`** — the shared journal of ALL server processes (every tool call, error+kind, per-pid) exposed to the agent itself as an emergency handle; interprocess mutex, rotation at 5 MB (`mcp.log.1/.2`)
 - Telemetry v2: millisecond timings, args summary (session, file, counters, feature flags `expect_old`/`dry_run`/`note`/`force`) in the journal
 - Structure: collaboration model extracted to `Sessions.cs`; undo/goto in `NavTools.cs`
-- Reviewed with external LLM consultants (DeepSeek R1 + ChatGPT, parallel): undo ranked P1 by both; macros rejected ("the model IS the macro executor"), background timers rejected for a no-push stdio server
+- Reviewed externally (parallel second opinions): undo ranked P1 by both; macros rejected ("the model IS the macro executor"), background timers rejected for a no-push stdio server
 
 ## v0.4.0 (2026-11-11)
 
@@ -210,7 +210,7 @@ Two issues, one release train: **#23 tree(deep)** — the project map becomes th
 - **Presence**: `open(path, note)` lists peers (id, note, pending edits, stale marker) + recent edits; `show`/`find` append missed `events` only when the caller fell behind (zero token tax otherwise); `sync(since_rev)` for explicit resync
 - **`peers_dirty` save guard**: save refuses while other sessions have unsaved edits; `force=true` publishes everything (one document = one truth)
 - `close` = detach (document lives while peers are attached); liveness via last-seen + 30-min stale marker
-- Architecture reviewed with DeepSeek R1: 6/10 as proposed, 8/10 after revisions
+- Architecture externally reviewed: 6/10 as proposed, 8/10 after revisions
 
 ## v0.3.1 (2026-11-11)
 
