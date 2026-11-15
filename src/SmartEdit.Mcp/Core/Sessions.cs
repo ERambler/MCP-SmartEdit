@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
-using SmartEdit.Mcp.Core;
 
-namespace SmartEdit.Mcp.Tools;
+namespace SmartEdit.Mcp.Core;
 
 // ── v0.4: коллаборация — один документ на путь, N подключений ──────────────────
 
@@ -14,8 +13,8 @@ sealed class Attachment {
     public required string Id { get; init; }
     public required EditSession Doc { get; init; }
     public string? Note { get; init; }
-    public int LastSeenRev;
-    public DateTime LastSeen = DateTime.UtcNow;
+    public int LastSeenRev { get; internal set; }
+    public DateTime LastSeen { get; internal set; } = DateTime.UtcNow;
     public bool Stale => (DateTime.UtcNow - LastSeen).TotalMinutes > 30;
 }
 

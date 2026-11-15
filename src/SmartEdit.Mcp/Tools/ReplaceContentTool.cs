@@ -13,16 +13,16 @@ namespace SmartEdit.Mcp.Tools;
 /// заканчиваться посреди строки — окружение сохраняется). Скан и применение — под одним док-локом;
 /// ожидаемые строки передаются как expect_old-якорь.
 /// </summary>
-sealed class ReplaceContentTool : ITool {
-    public string Name => "replace_content";
-    public string Description =>
+sealed class ReplaceContentTool : ToolBase {
+    public override string Name => "replace_content";
+    public override string Description =>
         "Replace an EXACT text snippet — no line numbers needed (the find→show→replace loop, minus the line math). " +
         "The snippet must occur EXACTLY ONCE: 0 matches → kind=not_found (copy it exactly from a fresh show/find — whitespace matters); " +
         ">1 → kind=ambiguous_match listing the matching lines (extend the snippet with surrounding lines to make it unique). " +
         "Multiline snippets and partial-line matches are supported (surrounding text on the first/last line is preserved). " +
         "Optional start_line/end_line narrow the search scope — the boilerplate antidote: the snippet must be unique WITHIN the bounds. " +
         "replace='' deletes the snippet. Same rev/dry_run contract as replace_lines; diagnostics returned as usual.";
-    public string InputSchemaJson => """
+    public override string InputSchemaJson => """
         {"type":"object","properties":{
           "session_id":{"type":"string","description":"from a previous response; optional if path given"},"path":{"type":"string","description":"file path (open-by-path: skip open entirely)"},
           "find":{"type":"string","description":"exact text to replace (multiline OK; must be unique in the file)"},
@@ -34,7 +34,7 @@ sealed class ReplaceContentTool : ITool {
         },"required":["find","replace"]}
         """;
 
-    public async Task<string> ExecuteAsync(JsonElement args, CancellationToken ct) {
+    public override async Task<string> ExecuteAsync(JsonElement args, CancellationToken ct) {
         var att = Sessions.Resolve(args.GetNullableString("session_id"), args.GetNullableString("path"));
         var s = att.Doc;
         string find = args.GetString("find");
@@ -48,7 +48,7 @@ sealed class ReplaceContentTool : ITool {
         int scopeFrom = Math.Max(1, args.GetInt("start_line", 1));   // v0.9.3 (Gemini): сужение скопа для бойлерплейта
         int scopeTo = args.GetInt("end_line", 0);                     // 0 = до конца файла
 
-        var outcome = await ToolOps.LockedAsync(s, () => {
+        var outcome = await LockedAsync(s, () => {
             // скан под локом: список вхождений (startLine, endLine, prefixLen, lastConsumed)
             var hits = new List<(int Start, int End, int Prefix, int Consumed)>();
             int lim = scopeTo > 0 ? Math.Min(scopeTo, s.TotalLines) : s.TotalLines;
@@ -90,7 +90,7 @@ sealed class ReplaceContentTool : ITool {
             return s.ReplaceLines(start, end, sb.ToString(), expectedRev, dryRun, expectOld, att.Id);
         });
         att.LastSeenRev = outcome.Rev; // v0.9: ответ доставил состояние
-        return ToolOps.Json(new MutationResult {
+        return Json(new MutationResult {
             Rev = outcome.Rev, TotalLines = outcome.TotalLines, Diff = outcome.Diff, DryRun = outcome.DryRun,
             Brackets = outcome.Brackets?.ToArray(),
             Recovered = outcome.Recovered, Intervening = outcome.Intervening?.ToArray(),

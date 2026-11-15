@@ -285,7 +285,7 @@ public static class SelfTest {
 
     static async Task ProtocolFlow(string dir) {
         var tools = new ToolRegistry();
-        tools.RegisterEditTools();
+        tools.RegisterAllTools();
         var h = new McpProtocolHandler(tools);
         static JsonElement J(string json) => JsonDocument.Parse(json).RootElement.Clone();
 
@@ -561,7 +561,7 @@ static class V02Features {
         File.WriteAllBytes(p, cp1251.GetBytes("текст\nперекодировка\n"));
 
         var tools = new ToolRegistry();
-        tools.RegisterEditTools();
+        tools.RegisterAllTools();
         var fi = (FileInfoResult)Json(txt(tools, "file_info", $$"""{"path":{{JsonSerializer.Serialize(p, RpcJson.Default.String)}}}"""), RpcJson.Default.FileInfoResult)!;
         SelfTest.CheckPublic(!fi.IsUtf8 && fi.Encoding.StartsWith("not-utf8"), "file_info: не-utf8 распознан");
         SelfTest.CheckPublic(fi.Newlines == "lf" && fi.Bytes > 0, "file_info: newlines+bytes");
@@ -584,7 +584,7 @@ static class V02Features {
         File.WriteAllText(Path.Combine(root, "readme.md"), "hi\n");
 
         var tools = new ToolRegistry();
-        tools.RegisterEditTools();
+        tools.RegisterAllTools();
         string args = $$"""{"path":{{JsonSerializer.Serialize(root, RpcJson.Default.String)}},"pattern":"*.*"}""";
         string json = await tools.CallAsync("tree", JsonDocument.Parse(args).RootElement.Clone(), default);
         var t = JsonSerializer.Deserialize<TreeResult>(json, RpcJson.Default.TreeResult)!;
@@ -671,7 +671,7 @@ static class V03Features {
     /// <summary>Протокольный уровень: ошибка инструмента = isError + текст-JSON {kind, current_rev}.</summary>
     public static async Task StructuredErrorsAsync(string dir) {
         var tools = new ToolRegistry();
-        tools.RegisterEditTools();
+        tools.RegisterAllTools();
         var h = new McpProtocolHandler(tools);
         static JsonElement J(string json) => JsonDocument.Parse(json).RootElement.Clone();
 
@@ -704,7 +704,7 @@ static class V03Features {
         File.SetLastWriteTimeUtc(b, DateTime.UtcNow.AddDays(-2));
 
         var tools = new ToolRegistry();
-        tools.RegisterEditTools();
+        tools.RegisterAllTools();
         string argsJson = $$"""{"path":{{JsonSerializer.Serialize(root, RpcJson.Default.String)}},"recent_hours":24}""";
         string json = tools.CallAsync("tree", JsonDocument.Parse(argsJson).RootElement.Clone(), default).GetAwaiter().GetResult();
         var t = JsonSerializer.Deserialize<TreeResult>(json, RpcJson.Default.TreeResult)!;
@@ -721,7 +721,7 @@ static class V04Features {
         File.WriteAllText(p, "a\nb\nc\n", new UTF8Encoding(false));
 
         var tools = new ToolRegistry();
-        tools.RegisterEditTools();
+        tools.RegisterAllTools();
 
         var o1 = Open(tools, p, "чиню конфиг");
         SelfTest.CheckPublic(!o1.Reused && o1.Peers.Length == 1 && o1.Peers[0].Note == "чиню конфиг", "collab: первый open");
@@ -781,7 +781,7 @@ static class V04Features {
 static class V05Features {
     public static void LogHandle() {
         var tools = new ToolRegistry();
-        tools.RegisterEditTools();
+        tools.RegisterAllTools();
         const string marker = "smartedit-selftest-v05-marker";
         SmartEdit.Mcp.Infra.Log.Info(marker + " проверка ручки");
 
@@ -862,7 +862,7 @@ static class V054Update {
 static class V062Outline {
     public static void Run(string dir) {
         var tools = new ToolRegistry();
-        tools.RegisterEditTools();
+        tools.RegisterAllTools();
 
         string cs = Path.Combine(dir, "v062_outline.cs");
         File.WriteAllText(cs, """
@@ -903,7 +903,7 @@ static class V062Outline {
 static class V070Stale {
     public static void Run(string dir) {
         var tools = new ToolRegistry();
-        tools.RegisterEditTools();
+        tools.RegisterAllTools();
 
         // каждый сценарий — СВОЙ файл: Sessions.Attach переиспользует общий документ по пути
         string Fresh(string tag) { // не static: захватывает dir из объёмлющего метода
@@ -1189,7 +1189,7 @@ static class V080Literals {
 static class V082Lock {
     public static void Run(string dir) {
         var tools = new ToolRegistry();
-        tools.RegisterEditTools();
+        tools.RegisterAllTools();
         string nl = ((char)10).ToString();
 
         // (a) ИНЦИДЕНТ-РЕГРЕССИЯ: open → tool-вызов (источник отпущен) → attachment ЖИВ → внешняя запись проходит
@@ -1261,7 +1261,7 @@ static class V082Lock {
 static class V090PathTxn {
     public static void Run(string dir) {
         var tools = new ToolRegistry();
-        tools.RegisterEditTools();
+        tools.RegisterAllTools();
         string nl = ((char)10).ToString();
         string J(string path) => path.Replace("\\", "\\\\");
 
@@ -1338,7 +1338,7 @@ static class V090PathTxn {
 static class V091Content {
     public static void Run(string dir) {
         var tools = new ToolRegistry();
-        tools.RegisterEditTools();
+        tools.RegisterAllTools();
         string nl = ((char)10).ToString();
         string J(string path) => path.Replace("\\", "\\\\");
         string Call(string json) => tools.CallAsync("replace_content", JsonDocument.Parse(json).RootElement.Clone(), default).GetAwaiter().GetResult();
@@ -1467,7 +1467,7 @@ static class V092CrossProcess {
 static class V093Nag {
     public static void Run(string dir) {
         var tools = new ToolRegistry();
-        tools.RegisterEditTools();
+        tools.RegisterAllTools();
         string nl = ((char)10).ToString();
         string J(string path) => path.Replace("\\", "\\\\");
 
@@ -1515,7 +1515,7 @@ static class V082Polish {
     public static void Run(string dir) {
         const string Lf = "\n";
         var tools = new ToolRegistry();
-        tools.RegisterEditTools();
+        tools.RegisterAllTools();
 
         // (#1) retry-структура: stale_conflict → reread_range + диапазон; stale_rev → reissue_with_rev
         string c = Path.Combine(dir, "pol-retry.cs");
@@ -1560,7 +1560,7 @@ static class V082Polish {
 static class V081Help {
     public static void Run(string dir) {
         var tools = new ToolRegistry();
-        tools.RegisterEditTools();
+        tools.RegisterAllTools();
         var page = tools.CallAsync("help", JsonDocument.Parse("{}").RootElement.Clone(), default).GetAwaiter().GetResult();
         SelfTest.CheckPublic(page.Contains("1-based") && page.Contains("end = start-1") && page.Contains("[1..0]".Replace("[1..0]", "replace_lines(1, 0")),
             "help: семантика диапазонов на странице");
@@ -1604,7 +1604,7 @@ static class V05Nav {
         _ = r; // прогрев кэша
         // goto-инструментом (Tools-слой)
         var tools = new ToolRegistry();
-        tools.RegisterEditTools();
+        tools.RegisterAllTools();
         string openJson = "{\"path\":" + JsonSerializer.Serialize(cs, RpcJson.Default.String) + "}";
         var o = JsonSerializer.Deserialize<OpenResult>(tools.CallAsync("open", JsonDocument.Parse(openJson).RootElement.Clone(), default).GetAwaiter().GetResult(), RpcJson.Default.OpenResult)!;
         var g = JsonSerializer.Deserialize<GotoResult>(tools.CallAsync("goto",

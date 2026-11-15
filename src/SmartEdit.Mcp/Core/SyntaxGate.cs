@@ -27,9 +27,9 @@ public static partial class SyntaxGate {
     static readonly TimeSpan Budget = TimeSpan.FromMilliseconds(1500);
 
     sealed class Engine {
-        public required Language Language;   // держим ссылку: Parser валиден, пока жив Language
-        public required Parser Parser;
-        public required SemaphoreSlim Lock;
+        public required Language Language { get; init; }   // держим ссылку: Parser валиден, пока жив Language
+        public required Parser Parser { get; init; }
+        public required SemaphoreSlim Lock { get; init; }
     }
 
     static readonly object LoadLock = new();

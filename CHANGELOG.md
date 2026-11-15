@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.13.1 (2026-11-15)
+
+- **Structural refactor: segments + one tool per file** (no behavior changes, tool contracts and wire format untouched):
+  - **Segments**: `Core/` (engine: document, session registry, analysis — no MCP, no tool JSON), `Rpc/` (transport + protocol dispatch), `Tools/` (27 tools), `Infra/` (paths/log/update), `Testing/` (SelfTest, Smoke — was in the project root). Dependency direction: `Program → Rpc → Tools → Core → Infra`;
+  - **1 tool = 1 class = 1 file**: the 8 category files (EditTools.cs alone held 10 tools + helpers + registration = 549 lines) are dissolved into 27 per-tool files — editing a tool means opening exactly one file;
+  - **OOP**: static `ToolOps` helper became `abstract ToolBase` (protected `Json`/`LockedAsync`/`Locked`/`CompileRegex`); `HiddenTool : ToolBase`; all 27 tools inherit the base instead of re-implementing `ITool`;
+  - **Colocation**: each tool's result DTO lives in its file; truly shared DTOs (PeerDto, MutationResult, DiagDto, GateErrorDto, BatchResult, SymbolDto) in `Tools/SharedDtos.cs`; session registry (`Sessions`/`Attachment`/`Presence`) moved Tools→Core (it is engine state); EditSession's 8 model records extracted to `Core/SessionModel.cs`;
+  - **Accessors**: result DTOs `{get;set;}` → `{get;init;}` (only `SavedOk`/`SaveError` keep `set` — genuinely mutated after save); `Attachment.LastSeenRev`/`LastSeenRev`/`LastSeen` public fields → properties with `internal set`; `SyntaxGate.Engine` required fields → `required {get;init;}`. `LexerState` intentionally stays a field-based state machine;
+  - registration centralized: `EditToolsRegistration.RegisterEditTools` (registered everything, name lied) → `Registration.RegisterAllTools`.
+
 ## v0.13.0 (2026-11-14)
 
 - **Deprecation wave #22, phase 1** (telemetry-driven: 7 tools, 0 live calls in ~1800): `symbols`, `calc`, `convert`, `sync`, `help`, `sessions`, `edit_transaction` are **hidden from `tools/list`** — the manifest shrinks 27 → 20. Nothing is deleted:

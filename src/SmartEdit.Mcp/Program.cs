@@ -38,7 +38,7 @@ UpdateCheck.CleanupOldBinary(); // подчистить .exe.old от прошл
 UpdateCheck.RunIfNeeded(args);
 
 var tools = new ToolRegistry();
-tools.RegisterEditTools();
+tools.RegisterAllTools();
 
 var server = new JsonRpcServer(new McpProtocolHandler(tools));
 await server.RunAsync(); // до EOF stdin + graceful drain активных обработок

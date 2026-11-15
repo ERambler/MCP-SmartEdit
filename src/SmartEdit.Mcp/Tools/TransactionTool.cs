@@ -119,7 +119,7 @@ sealed class TransactionTool : HiddenTool {
                         try { doc.Save(false, "keep", false, f.SessionId); f.SavedOk = true; }
                         catch (ToolException ex) { f.SavedOk = false; f.SaveError = $"{ex.Kind}: {ex.Message}"; }
                     }
-                return ToolOps.Json(new TransactionResult { DryRun = dryRun, SaveRequested = save, Applied = files.Sum(f => f.Applied), Files = files,
+                return Json(new TransactionResult { DryRun = dryRun, SaveRequested = save, Applied = files.Sum(f => f.Applied), Files = files,
                     UnsavedFiles = dryRun ? 0 : files.Count(f => f.SavedOk != true) // v0.9.3: сохрани каждый
                 }, RpcJson.Default.TransactionResult);
             }
@@ -129,4 +129,25 @@ sealed class TransactionTool : HiddenTool {
         }
         finally { TxnGate.Release(); }
     }
+}
+
+/// <summary>Per-file итог edit_transaction (#3).</summary>
+public sealed class TxFileDto {
+    public string Path { get; init; } = "";
+    public string SessionId { get; init; } = "";
+    public int Rev { get; init; }
+    public int TotalLines { get; init; }
+    public int Applied { get; init; }
+    public List<string> Diffs { get; init; } = [];
+    public DiagDto[]? Diagnostics { get; init; }
+    public bool? SavedOk { get; set; }     // save:true → статус файла (null = save не запрашивался); мутируется после save
+    public string? SaveError { get; set; }
+}
+
+public sealed class TransactionResult {
+    public bool DryRun { get; init; }
+    public bool SaveRequested { get; init; }
+    public int Applied { get; init; }
+    public List<TxFileDto> Files { get; init; } = [];
+    public int UnsavedFiles { get; init; } // v0.9.3: файлов с неприменённым save — сохрани каждый (save(path))
 }

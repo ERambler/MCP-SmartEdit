@@ -17,12 +17,8 @@ public interface ITool {
 }
 
 /// <summary>Базовый класс скрытого инструмента: Hidden = true, всё остальное — обычный инструмент.</summary>
-public abstract class HiddenTool : ITool {
-    public abstract string Name { get; }
-    public abstract string Description { get; }
-    public abstract string InputSchemaJson { get; }
-    public bool Hidden => true;
-    public abstract Task<string> ExecuteAsync(JsonElement args, CancellationToken ct);
+public abstract class HiddenTool : ToolBase {
+    public override bool Hidden => true;
 }
 
 public sealed class ToolRegistry {
