@@ -2,12 +2,12 @@
 
 **A safety-first text editor for LLM coding agents.** A zero-dependency [Model Context Protocol](https://modelcontextprotocol.io) stdio server: a **token-budgeted project map** (learn an architecture in one call), edits by **line number** (no byte-exact `old_string` to drift), **syntax-gated saves** (broken code never hits the disk), atomic multi-edit and multi-file transactions, undo, multi-agent collaboration — all with **range reads and diff responses**, so you never pay the whole file in tokens. Works with any MCP client: **ZCode, Claude Desktop, Cursor, Windsurf, Cline**, anything that speaks stdio MCP.
 
-[![Version](https://img.shields.io/badge/version-v0.13.2-blue)](https://github.com/ERambler/MCP-SmartEdit/releases)
+[![Version](https://img.shields.io/badge/version-v0.13.3-blue)](https://github.com/ERambler/MCP-SmartEdit/releases)
 [![CI](https://img.shields.io/badge/CI-build%2Bsmoke-green)](https://github.com/ERambler/MCP-SmartEdit/actions/workflows/ci.yml)
 [![.NET](https://img.shields.io/badge/.NET-10-purple)](https://dotnet.microsoft.com/download/dotnet/10.0)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-stdio%20server-orange)](https://modelcontextprotocol.io)
-[![Selftest](https://img.shields.io/badge/selftest-314%20checks%20ALL%20PASS-brightgreen)](#verification)
+[![Selftest](https://img.shields.io/badge/selftest-319%20checks%20ALL%20PASS-brightgreen)](#verification)
 
 ## The pain it kills
 
@@ -149,7 +149,7 @@ Downloads the latest release to `%LOCALAPPDATA%\SmartEdit\bin`, runs the selftes
 
 ## Verification
 
-- **314 selftest checks** (exit 0/1, CI gate on every push): five-language literal fixtures, anchored diagnostics, stale-recovery scenarios, save-torture (byte-exact disk verification after every save), the piece-table corruption regression, `create` semantics, encodings, collaboration, undo, session-eviction locks (idle/cap/never-dirty/re-open), tree-map locks (inheritance edges, budget tail, auto-fallback, mtime cache), 300 MB big-file flow, full protocol round-trip, corpus fuzz (every repo .cs file must pass the audit).
+- **319 selftest checks** (exit 0/1, CI gate on every push): five-language literal fixtures, anchored diagnostics, stale-recovery scenarios, save-torture (byte-exact disk verification after every save), the piece-table corruption regression, `create` semantics, encodings, collaboration, undo, session-eviction locks (idle/cap/never-dirty/re-open), tree-map locks (inheritance edges, budget tail, auto-fallback, mtime cache, junk skip, DTO folding), 300 MB big-file flow, full protocol round-trip, corpus fuzz (every repo .cs file must pass the audit).
 - **67 live smoke checks** (~1 s, CI gate on build *and* on the published release binary): real server over stdio, every tool happy-path + edges, plus a **drunk-LLM pack** — wrong line math, ancient revs, hallucinated session ids, garbage-typed args, 50K-char edits, double-edits. The server must help, not crash.
 - Per-call milliseconds are written to the shared journal — audit performance yourself.
 
@@ -157,6 +157,7 @@ Downloads the latest release to `%LOCALAPPDATA%\SmartEdit\bin`, runs the selftes
 
 Brief — the full history lives in [CHANGELOG.md](CHANGELOG.md).
 
+- **v0.13.3** — `tree(deep)` polish: own junk (`.smartedit-bak` etc.) never in the map, trivial DTO props folded out of the skeleton budget, deep response carries no dead fields
 - **v0.13.2** — **`tree(deep)`**: the project map is the first call (tree-sitter skeleton, inheritance edges `Base(file:line)`, `path:line` anchors, token budget); session lifecycle automated (idle/cap auto-evict, dirty never); `close` hidden — manifest **19 tools**
 - **v0.13.1** — structural refactor: segments (Core/Rpc/Tools/Infra/Testing), one tool = one class = one file, `ToolBase`
 - **v0.13.0** — deprecation wave #22 phase 1: 7 zero-use tools hidden from `tools/list` (27→20), by-name calls live with a wrapper

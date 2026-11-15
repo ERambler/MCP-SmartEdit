@@ -43,9 +43,10 @@ sealed class TreeTool : ToolBase {
                 TotalFiles = map.FilesTotal,
                 ListedFiles = map.FilesTotal,
                 SkippedDirs = map.SkippedDirs,
-                TotalBytes = 0,
+                TotalBytes = map.TotalBytes, // #25: честно из сканера (0 выглядел ошибкой)
                 Deep = true,
-                Map = map.Text,
+                Map = map.Text,               // карта сама и есть перепись — groups не сериализуется (#25)
+                Groups = null,
             }, RpcJson.Default.TreeResult);
         }
 
@@ -70,8 +71,9 @@ public sealed class TreeResult {
     public int TotalFiles { get; init; }
     public int ListedFiles { get; init; }
     public int SkippedDirs { get; init; }
-    public long TotalBytes { get; init; }
-    public TreeGroupDto[] Groups { get; init; } = [];
+    /// <summary>#25: null при deep — карта сама перепись (пустые группы и bytes=0 путали). Null не сериализуется.</summary>
+    public long? TotalBytes { get; init; }
+    public TreeGroupDto[]? Groups { get; init; } = [];
     /// <summary>#23 (v0.13.2): фактический режим — deep авто-откатывается при pattern/recent_hours.</summary>
     public bool Deep { get; init; }
     /// <summary>Скелет-карта (deep=true): каталоги, типы с рёбрами наследования, path:line якоря.</summary>

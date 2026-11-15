@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.13.3 (2026-11-15)
+
+**#25: tree(deep) polish** — три шероховатости, найденные живым A/B-пилотом v0.13.2 на собственном репо (73 файла). Один заезд, без смены контрактов.
+
+- **Собственный мусор не попадает в карту**: ProjectScanner скипает `*.smartedit-bak` / `*.smartedit-shadow` / `*.smartedit-tmp` (как .gitignore) — save-бэкапы, созданные во время живой правки, больше не висят в скелете и не считаются «языком» (`smartedit-bak=2` в цензе).
+- **Тривиальные DTO-пропы не едят бюджет скелета**: интересный член = метод/ctor/def, или с doc, или не-DTO поле/проп. Тривиальные (имена из DTO-джентльменского набора: Name/Description/Rev/TotalLines/Diffs/…, или тип — чистый DTO без единого метода) сворачиваются в хвост `… +N`. Бонус формата: методы теперь всегда со скобками — `Count()` видно как поведение, а не поле.
+- **Deep-ответ без мёртвых полей**: `groups` не сериализуется (карта сама и есть перепись), `totalBytes` честный из сканера (0 выглядел ошибкой).
+- Замки (+5, итого **319**): bak-мусор в дереве, свёртка чистого DTO, doc-метод показан + тривиальный проп свёрнут, сырой deep-JSON без `groups` и с честным `totalBytes`.
+
 ## v0.13.2 (2026-11-15)
 
 Two issues, one release train: **#23 tree(deep)** — the project map becomes the first call; **#24** — session lifecycle goes automatic. Extraction is tree-sitter (user decision 2026-11-15: the parser already ships for the gate — bases/inheritance are tree nodes, not regex surgery; old SymbolScan scanners stay for open/symbols/goto).

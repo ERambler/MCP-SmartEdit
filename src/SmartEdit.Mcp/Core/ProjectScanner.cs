@@ -33,6 +33,11 @@ public static partial class ProjectScanner {
                 queue.Enqueue(sub);
             }
             foreach (var f in Directory.EnumerateFiles(dir, pattern)) {
+                // #25 (v0.13.3): собственный мусор SmartEdit не показываем ни в карте, ни в списке
+                // (save-бэкапы и страховки — как .gitignore)
+                string fname = Path.GetFileName(f);
+                if (fname.EndsWith(".smartedit-bak") || fname.EndsWith(".smartedit-shadow") || fname.EndsWith(".smartedit-tmp"))
+                    continue;
                 var fi = new FileInfo(f);
                 if ((fi.Attributes & FileAttributes.Hidden) != 0) continue;
                 if (recent && fi.LastWriteTimeUtc < cutoff) continue;

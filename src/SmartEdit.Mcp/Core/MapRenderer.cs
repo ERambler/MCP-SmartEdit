@@ -56,7 +56,7 @@ public static class MapRenderer {
             sb.AppendLine(string.Join(" · ", chips));
         sb.AppendLine("langs: " + string.Join(" ", langCounts.OrderByDescending(p => p.Value).Take(6)
             .Select(p => $"{p.Key}={p.Value}")));
-        return new MapRender(sb.ToString(), files.Count, typesShown, typesTotal, SkippedDirs: 0);
+        return new MapRender(sb.ToString(), files.Count, typesShown, typesTotal, SkippedDirs: 0, TotalBytes: 0);
     }
 
     // ── скелет файла: типы с рёбрами наследования, топ-члены с doc ───────────
@@ -70,21 +70,41 @@ public static class MapRenderer {
                     index.TryGetValue(b, out var hit) ? $"{b}({hit.Rel}:{hit.Line})" : b)));
             }
             sb.AppendLine();
-            foreach (var m in TopMembers(t.Members)) {
+            // #25: чистый DTO (тип без единого метода) — все его пропы тривиальны, скелет не тратит бюджет
+            bool dtoOnlyProps = t.Kind is "record" or "class"
+                && t.Members.Count > 0 && t.Members.All(m => m.Kind is "property" or "field");
+            var shown = TopMembers(t.Members, dtoOnlyProps);
+            foreach (var m in shown) {
                 sb.Append("      ").Append(m.Name);
-                if (m.Args.Length > 0) sb.Append('(').Append(m.Args).Append(')');
+                // метод/ctor/def всегда со скобками (пустые тоже) — видно, что это поведение, а не поле
+                if (m.Args.Length > 0 || m.Kind is "method" or "ctor" or "def")
+                    sb.Append('(').Append(m.Args).Append(')');
                 if (m.Doc is { Length: > 0 }) sb.Append(" — ").Append(m.Doc);
                 sb.AppendLine();
             }
-            if (t.Members.Count > TopN) sb.AppendLine($"      … +{t.Members.Count - TopN} more");
+            if (t.Members.Count > shown.Count)
+                sb.AppendLine($"      … +{t.Members.Count - shown.Count} more"); // тривиальные пропы живут здесь (#25)
         }
         return sb;
     }
 
-    /// <summary>Топ-N членов: методы/ctor/def важнее, с doc — важнее, дальше по порядку объявления (v1-ранжирование).</summary>
-    static List<MapMember> TopMembers(List<MapMember> members) =>
-        [.. members.OrderByDescending(m => m.Kind is "method" or "ctor" or "def" ? 1 : 0)
-                   .ThenByDescending(m => m.Doc is null ? 0 : 1)
+    /// <summary>#25: типовые имена DTO-полей — в скелете не несут смысла (информативность ≈ 0, бюджет ≠ 0).</summary>
+    static readonly HashSet<string> TrivialProps = [
+        "Name", "Description", "Rev", "TotalLines", "Diffs", "Applied", "Path", "DryRun", "Bytes",
+        "Encoding", "Truncated", "Unsaved", "Peers", "SessionId", "InputSchemaJson", "Id", "Kind",
+        "Value", "Text", "Hash", "Gate", "Root", "Start", "End", "Line", "Message", "Created", "Closed",
+    ];
+
+    /// <summary>Интересный член: метод/ctor/def, или с doc, или не-DTO поле/проп. Тривиальные — в хвост.</summary>
+    static bool Interesting(MapMember m, bool dtoOnlyProps) =>
+        m.Kind is "method" or "ctor" or "def"
+        || m.Doc is not null
+        || !(m.Kind is "property" or "field" && (dtoOnlyProps || TrivialProps.Contains(m.Name)));
+
+    /// <summary>Топ-N интересных: методы/ctor/def → с doc → прочие содержательные; дальше по порядку объявления.</summary>
+    static List<MapMember> TopMembers(List<MapMember> members, bool dtoOnlyProps) =>
+        [.. members.Where(m => Interesting(m, dtoOnlyProps))
+                   .OrderBy(m => m.Kind is "method" or "ctor" or "def" ? 0 : m.Doc is null ? 1 : 2)
                    .ThenBy(m => m.Line)
                    .Take(TopN)];
 

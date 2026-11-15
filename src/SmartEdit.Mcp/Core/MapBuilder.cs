@@ -3,7 +3,7 @@ using System.Collections.Concurrent;
 namespace SmartEdit.Mcp.Core;
 
 /// <summary>Итог рендера карты: текст + счётчики для замков selftest.</summary>
-public sealed record MapRender(string Text, int FilesTotal, int TypesShown, int TypesTotal, int SkippedDirs);
+public sealed record MapRender(string Text, int FilesTotal, int TypesShown, int TypesTotal, int SkippedDirs, long TotalBytes);
 
 /// <summary>
 /// #23 (v0.13.2): сборка project-map: файлы из ProjectScanner (инвентарь всегда полный) →
@@ -37,7 +37,7 @@ public static class MapBuilder {
 
         int budgetChars = Math.Clamp(budgetTokens, 512, 8192) * 4; // токен ≈ 4 символа кода
         var r = MapRenderer.Render(files, index, budgetChars);
-        return r with { SkippedDirs = scan.SkippedDirs };
+        return r with { SkippedDirs = scan.SkippedDirs, TotalBytes = scan.TotalBytes };
     }
 
     /// <summary>Карта файла из кэша; mtime/size не совпали — перескан. Никогда не бросает.</summary>
