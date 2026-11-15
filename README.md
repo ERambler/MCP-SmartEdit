@@ -2,7 +2,7 @@
 
 **A safety-first text editor for LLM coding agents.** A zero-dependency [Model Context Protocol](https://modelcontextprotocol.io) stdio server: edits by **line number** (no byte-exact `old_string` to drift), **syntax-gated saves** (broken code never hits the disk), atomic multi-edit and multi-file transactions, undo, multi-agent collaboration — all with **range reads and diff responses**, so you never pay the whole file in tokens. Works with any MCP client: **ZCode, Claude Desktop, Cursor, Windsurf, Cline**, anything that speaks stdio MCP.
 
-[![Version](https://img.shields.io/badge/version-v0.12.0-blue)](https://github.com/ERambler/MCP-SmartEdit/releases)
+[![Version](https://img.shields.io/badge/version-v0.13.1-blue)](https://github.com/ERambler/MCP-SmartEdit/releases)
 [![CI](https://img.shields.io/badge/CI-build%2Bsmoke-green)](https://github.com/ERambler/MCP-SmartEdit/actions/workflows/ci.yml)
 [![.NET](https://img.shields.io/badge/.NET-10-purple)](https://dotnet.microsoft.com/download/dotnet/10.0)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
