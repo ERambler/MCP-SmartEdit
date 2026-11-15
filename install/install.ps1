@@ -39,6 +39,18 @@ Write-Host "Running selftest (~30s, writes to %TEMP%\smartedit-selftest) ..."
 if ($LASTEXITCODE -ne 0) { Write-Host "ERROR: selftest FAILED" -ForegroundColor Red; exit 1 }
 Write-Host "Selftest OK. Binary: $exe" -ForegroundColor Green
 
+# 3.5) companion skill for hosts that HAVE a skills folder (fills existing dirs only — nothing is created;
+#       the same lifecycle also ships protocol-native via the initialize `instructions` field)
+$skillUrl = "https://raw.githubusercontent.com/$repo/main/skills/zcode-smartedit/SKILL.md"
+foreach ($dir in @("$env:USERPROFILE\.zcode\skills", "$env:USERPROFILE\.claude\skills")) {
+    if (Test-Path $dir) {
+        $dst = Join-Path $dir 'smartedit'
+        New-Item -ItemType Directory -Force -Path $dst | Out-Null
+        Invoke-WebRequest $skillUrl -OutFile (Join-Path $dst 'SKILL.md')
+        Write-Host "Skill installed: $dst\SKILL.md (delete the folder to uninstall)" -ForegroundColor Green
+    }
+}
+
 # 4) client config snippets
 Write-Host @"
 

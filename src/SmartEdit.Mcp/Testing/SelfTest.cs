@@ -296,6 +296,10 @@ public static class SelfTest {
             Params = J("""{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}"""),
         });
         SelfTest.Check(err is null && res!.Value.GetProperty("serverInfo").GetProperty("name").GetString() == "smartedit", "proto: initialize");
+        // v0.13.2: instructions = обязательный жизненный цикл (tree-first + create) — авто-скилл каждому хосту
+        string? instr = res!.Value.GetProperty("instructions").GetString();
+        SelfTest.Check(instr != null && instr.Contains("tree(path) first") && instr.Contains("create(path, content)")
+            && instr.Contains("unsaved:true"), "proto: initialize instructions = lifecycle");
 
         (res, err) = await h.HandleAsync(new RpcRequest { Method = "tools/list", Id = J("2") });
         SelfTest.Check(err is null && res!.Value.GetProperty("tools").GetArrayLength() == 19, "proto: 19 инструментов (8 скрыты: #22 ×7 + close #24)");
@@ -1944,6 +1948,10 @@ static class V132DeepMap {
             "class Service:\n    def run(self):\n        pass\n\nclass Child(Service):\n    '''doc for Child'''\n    def go(self, x):\n        return x\n");
         File.WriteAllText(Path.Combine(mini, "web.ts"),
             "export class OrderService extends Base {\n    fetch(url: string) { return fetch(url); }\n}\nexport function helper(x) { return x; }\n");
+        // #25: собственный мусор SmartEdit и DTO-шум не едят бюджет карты
+        File.WriteAllText(Path.Combine(mini, "Noise.cs.smartedit-bak"), "class Ghost { }\n");
+        File.WriteAllText(Path.Combine(mini, "Dto.cs"),
+            "namespace Mini;\n\nclass PureDto {\n    public string SessionId { get; set; }\n    public int Rev { get; set; }\n}\n\nclass Mixed {\n    /// <summary>Counts.</summary>\n    public int Count() { return 1; }\n    public string Description { get; set; }\n}\n");
 
         var t = Call(tools, mini);
         SelfTest.CheckPublic(t.Deep && t.Map is not null, "deep: включён по умолчанию, Map в ответе");
@@ -1956,6 +1964,16 @@ static class V132DeepMap {
         SelfTest.CheckPublic(m.Contains("fetch(url)"), "deep: ts-метод");
         SelfTest.CheckPublic(m.Contains("langs: "), "deep: языковый ценз в шапке");
         SelfTest.CheckPublic(m.Contains("Alpha.cs:3 [7]"), "deep: якорь файла = строка первого типа, [строки]");
+        SelfTest.CheckPublic(!m.Contains("smartedit-bak") && !m.Contains("class Ghost"), "deep: .smartedit-bak не попадает в карту и языковый ценз (#25)");
+        SelfTest.CheckPublic(m.Contains("class PureDto") && !m.Contains("      SessionId") && m.Contains("… +2 more"),
+            "deep: чистый DTO — пропы свёрнуты в хвост, тип остался (#25)");
+        SelfTest.CheckPublic(m.Contains("Count() — Counts.") && m.Contains("… +1 more"),
+            "deep: метод с doc показан, тривиальный Description свёрнут (#25)");
+        string rawDeep = tools.CallAsync("tree",
+            JsonDocument.Parse($"{{\"path\":{JsonSerializer.Serialize(mini, RpcJson.Default.String)}}}").RootElement.Clone(),
+            default).GetAwaiter().GetResult();
+        SelfTest.CheckPublic(rawDeep.Contains("\"deep\":true") && !rawDeep.Contains("\"groups\"") && !rawDeep.Contains("\"totalBytes\":0"),
+            "deep: без мёртвых полей — groups не сериализуется, totalBytes честный (#25)");
 
         // ── кэш mtime: правка файла → карта меняется (save меняет mtime — тот же механизм) ──
         File.WriteAllText(Path.Combine(mini, "Alpha.cs"),

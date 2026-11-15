@@ -45,17 +45,21 @@ public sealed class McpProtocolHandler(ToolRegistry tools) {
         return new InitializeResult {
             ProtocolVersion = clientVersion ?? ProtocolVersion,
             ServerInfo = new ServerInfoDto { Name = "smartedit", Version = ServerVersion },
-            Instructions = "First contact? Call help() — the full API map in one response. " +
-            "Line-based text editor + code structure vision. open(path) → session_id, rev, usings, outline. " +
-                "symbols(session_id) → code structure with line numbers; docs_only=true → documented only. " +
-                "show(start,end) → numbered lines; find(regex, context=N) → line numbers + snippets + breadcrumbs. " +
-                "Mutations: replace_lines/insert_after (rev guard, dry_run, optional expect_old anchor), " +
-                "edit_batch (atomic multi-edit, one rev bump, bottom-up — no shift math), " +
-                "replace_all (literal rename across the file). Errors come as JSON {kind, message, current_rev?}: " +
-                "stale_rev/anchor_mismatch/invalid_range/batch_overlap/too_large/... — branch on kind, not prose. " +
-                "save() keeps the original encoding, atomic with backup; rev does NOT change on save. " +
-                "check() → bracket audit (full file up to 200k lines). " +
-                "tree(dir) → project map (recent_hours=N → recently modified only). file_info/convert/calc as utilities.",
+            // v0.13.2: инструкции = обязательный жизненный цикл (тот же, что в skills/zcode-smartedit/SKILL.md;
+            // держать синхронно). initialize отдаёт их КАЖДОМУ хосту — «скилл добавляется сам», ноль файлов.
+            Instructions = "SmartEdit — line-based code editor; the disk is touched ONLY by save. THE LIFECYCLE: " +
+                "(1) ORIENT: tree(path) first — deep project skeleton: directories, types with inheritance, " +
+                "path:line anchors that plug straight into show/goto; budget_tokens caps it (default 2048). " +
+                "Don't read files whole to learn a project. " +
+                "(2) DRILL IN: goto(path, name), find(path, regex, context=2), show(path, start, end) — ranges, not whole files. " +
+                "(3) NEW FILE: create(path, content) — RAM until first save, seed syntax-checked in the response. " +
+                "(4) EDIT LADDER: replace_content (exact text, no line math) → edit_batch (2+ edits, atomic) → " +
+                "replace_all (rename) → edit_transaction (multi-file, all-or-nothing). " +
+                "(5) save(path) ALWAYS closes a series — syntax gate (.cs/.js/.ts/.tsx/.py/.sh) refuses NEW errors; " +
+                "a response with unsaved:true means save before bash/git. " +
+                "No rituals: no open (every tool takes path), no close (clean sessions self-evict). " +
+                "Errors are JSON {kind,...}: stale_rev/anchor_mismatch/syntax_gate/disk_conflict/... — branch on kind. " +
+                "help() (by name) maps every tool and error → exact next action.",
         };
     }
 

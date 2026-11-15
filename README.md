@@ -119,7 +119,7 @@ Memory stays flat on giants: memory-mapped base + piece-table edits; `save` stre
 irm https://raw.githubusercontent.com/ERambler/MCP-SmartEdit/main/install/install.ps1 | iex
 ```
 
-Downloads the latest release to `%LOCALAPPDATA%\SmartEdit\bin`, runs the selftest, prints ready-to-paste client configs.
+Downloads the latest release to `%LOCALAPPDATA%\SmartEdit\bin`, runs the selftest, prints ready-to-paste client configs. If it finds a host skills folder (`~/.zcode/skills`, `~/.claude/skills`), it also drops the companion [skill](skills/zcode-smartedit/SKILL.md) there (delete the `smartedit` folder to uninstall). Either way, the usage lifecycle ships protocol-native in the `initialize` response (`instructions`) — no files needed for it.
 
 ### Option B — manual
 
