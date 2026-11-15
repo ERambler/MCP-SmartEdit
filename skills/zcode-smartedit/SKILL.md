@@ -1,6 +1,6 @@
 ---
 name: smartedit
-description: Use the SmartEdit MCP tools (mcp__smartedit__*) INSTEAD of built-in Read/Edit for editing any file over ~150 lines, for multi-edit series, for exploring code structure (symbols/tree/goto), finding all occurrences with context, encoding work (cp1251/UTF-16), and exact arithmetic. Fires on file editing, large file refactoring, code navigation, calculations. DEFAULT editor for code files — built-in Edit only for trivial one-liners.
+description: Use the SmartEdit MCP tools (mcp__smartedit__*) INSTEAD of built-in Read/Edit for ALL code work — project orientation (tree FIRST), creating new files (create, not Write), editing any file over ~150 lines, multi-edit series, mass renames, finding occurrences with context, encoding work (cp1251/UTF-16). Fires on file editing, code navigation, understanding a codebase, large-file refactoring. DEFAULT editor for code files — built-in Edit only for trivial one-liners.
 ---
 
 # SmartEdit — the default line-based editor
@@ -10,37 +10,57 @@ summarization). SmartEdit edits by **line numbers** — nothing to mismatch. The
 server's RAM, not in your context. Every edit answers back: diff, **anchored diagnostics**,
 and auto-recovery if a peer raced you.
 
+## Lifecycle (mandatory — this is THE workflow)
+
+0. **New project/chat → `tree(path)` FIRST.** One call = the whole picture: directories, types with
+   inheritance edges resolved to `file:line`, top members with doc lines, `path:line` anchors that plug
+   straight into `show`/`goto`. Skeleton is budget-capped (`budget_tokens`, default 2048, max 8192 for
+   big repos; the tail honestly says `… +N types`). Do NOT orient by reading files whole —
+   that is the 30–100K-token habit this call replaces.
+1. **Drill in**: `goto(path, name)` for a symbol, `find(path, regex, context=2)` for usages,
+   `show(path, start..end)` for the exact lines. Never read a file whole when a range or the map answers it.
+2. **Create a file → `create(path, content)`, NOT Write.** Phantom RAM session: disk untouched until
+   `save`; the seed is syntax-checked right in the response (advisory), first save gates hard.
+   (Write touches disk immediately and bypasses the gate.)
+3. **Edit**: exact text known → `replace_content` (no line math, uniqueness anchors it);
+   series in one file → `edit_batch`; mass rename → `replace_all`; one logical change across 2+ files →
+   `edit_transaction`.
+4. **`save(path)` is ALWAYS the closer.** Edits live in server RAM; the syntax gate runs here.
+   Any response nagging `unsaved: true` = save before switching to bash/git/tests.
+5. **No rituals**: no `open` before editing (path-first everywhere), no `close` after (clean sessions
+   self-evict after 30 min idle / 16-doc LRU; dirty ones are NEVER evicted).
+   `open` only for extras (outline/encoding/note); `close` only to force-drop unsaved edits.
+
 ## When SmartEdit (default for code)
 
-- Any file **> ~150 lines** — open amortizes across the edit series
+- **Orientation in a known OR unknown project**: `tree(path)` — deep skeleton by default (v0.13.2)
+- Any file **> ~150 lines** — the session amortizes across the edit series
+- **New files**: `create(path, content)` — RAM until save, gate-checked
 - **Edit series** in one file: 2+ edits → `edit_batch` (atomic, no shift math)
 - **Mass rename**: `replace_all` (literal, not regex, one rev)
-- **Structure**: `open` returns `code_outline` (top-50 symbols, ≤5k-line code files) — no extra call;
-  deeper: `symbols` / `goto(name)` / `tree`
-- **All occurrences**: `find(regex, context=2)` — snippets + breadcrumb `Ns.Class.Method`
-- **Encodings**: cp1251/UTF-16 (`open` with `encoding`), `file_info`, `convert`; `save` defaults to keep
+- **All occurrences**: `find(regex, context=2)` — snippets + breadcrumb `Ns.Class.Method` + edit-ready spans
+- **Encodings**: cp1251/UTF-16 (`open` with `encoding`), `file_info`, `convert` (by name); `save` keeps encoding
 - File **dropped from context** after summarization — don't re-read: `find(path, …)` / `goto(path, …)` → edit
 - Giants up to ~2 GB UTF-8 (mmap): `show`/`find` read only what is asked
-- **Exact math**: `calc` (hex/bin, ^, !, functions). Never mental arithmetic.
 - **Undo a bad edit**: `undo(n, expected_rev)` (undo twice = redo)
-- **What did I / others do**: `log(grep=..., errors_only=true)` — shared journal; `sessions` — who holds which file
+- **What did I / others do**: `log(grep=..., errors_only=true)` — shared journal (by name)
 
 ## When built-in Edit
 
-- File ≤ 150 lines, one-off single-line tweak, file already in context
-- Creating a new file (Write)
+- File ≤ 150 lines, one-off single-line tweak, file already in context — and nothing else:
+  new files go through `create`, code edits through SmartEdit
 
 ## Workflow
 
-1. `show(path, 1..N)` / `find(path, regex, context=2)` / `goto(path, name)` — path directly, no open (v0.9)
-2. `open(path)` → sessionId, rev, code_outline, peers — only for its extras (outline/encoding/note); repeat open = attach to the shared document
+1. Orient: `tree(path)` — skeleton + inheritance + anchors (Lifecycle step 0)
+2. Read what you'll touch: `show(path, start..end)` / `find(path, regex, context=2)` / `goto(path, name)` — path directly, no open (v0.9)
 3. One edit: `replace_lines(path, start, end, new_text, expect_old?)`;
    have the EXACT text instead? `replace_content(path, find, replace)` — no line numbers, must be unique;
    boilerplate not unique? bound the scope with `start_line/end_line` (v0.9.3);
    2+ edits in one file: `edit_batch(path, edits[])` — all ranges/anchors validated BEFORE applying, no shift math;
    rename: `replace_all(path, find, replace)`;
    2+ FILES: `edit_transaction(steps[])` — all-or-nothing across files
-4. `save(path)` — keeps encoding by default; rev does NOT change on save
+4. `save(path)` — gate runs HERE; keeps encoding by default; rev does NOT change on save
 
 ## Hard rules (non-negotiable)
 
@@ -83,7 +103,9 @@ and auto-recovery if a peer raced you.
   to false (RAM-staging): inspect diffs, then `save` each path (or pass `save:true` for best-effort per-file)
 - `expected_rev` is OPTIONAL everywhere: omit = the last rev you observed (the server tracks it); pass it
   explicitly only to assert no peer raced you. Path-mode needs zero rev bookkeeping
-- Close sessions when done; `close` works by path too (v0.8.2: clean sessions never lock files — closing frees RAM)
+- **Lifecycle is automatic** (v0.13.2): clean sessions never hold files and self-evict (30 min idle /
+  16-doc LRU, dirty never evicted); `close` (hidden, by name) is the manual valve to force-drop unsaved
+  edits — a shadow backup keeps them recoverable
 
 ## If something looks wrong (abnormal — not a ritual)
 

@@ -47,6 +47,8 @@ What actually saves tokens on large files:
 - **`replace_content`**: exact-text anchors, no line math → fewer failed calls, fewer re-reads.
 - **RAM staging**: edits accumulate in memory, `save` is explicit and rare — intermediate states cost zero round-trips.
 
+**Field-checked** (dogfood pilot on this very repo, 73 files / 558 KB; payload-based estimate, n=1): orienting with built-in habits (list + grep + 4 file reads) cost **6 calls ≈ 8.9K tokens and covered 5% of the files**; `tree(deep)` cost **1 call ≈ 2.5K tokens and covered 100%** — every file, ~80 types in-skeleton with inheritance resolved and doc lines, honest tail for the rest. Reaching the same coverage without the map means reading the whole tree ≈ **~140K tokens — ≈ 50× on the orientation pass**. The map is a navigator, not a replacement for reading the lines you're about to edit — those `show` reads stay.
+
 What is *not* a token feature (so we don't claim it): the piece-table/mmap engine is **memory and speed** economy (flat RAM on 300 MB files, <1 ms per call) — it makes the editor possible, it doesn't shrink your prompt.
 
 How to verify instead of trusting us: tokens-per-task (SmartEdit vs your built-in Edit on the same change), tool-calls-to-done, and edit success rate are all measurable from the shared journal (`log` tool greps itself). We dogfood daily; **post your numbers, we'll post ours**.
@@ -94,6 +96,7 @@ Every error is JSON with a machine `kind` (`stale_rev`, `anchor_mismatch`, `synt
 | `find` regex over 300 MB | **0.6 s** |
 | `save` 300 MB (streamed, xxHash64 on the fly) | **1.5 s** |
 | Syntax gate, typical file (tree-sitter, lazy grammars) | **0.2–30 ms** |
+| `tree(deep)` full-project skeleton, 73 files — cold (incl. process boot + parsing all files) | **0.76 s**; warm re-render ≈ ms (mtime cache) |
 | Typical tool call | **< 1 ms** server-side (ms-precision in the journal) |
 
 Memory stays flat on giants: memory-mapped base + piece-table edits; `save` streams.
