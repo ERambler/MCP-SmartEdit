@@ -10,7 +10,7 @@ $zip   = Join-Path $env:TEMP 'smartedit-release.zip'
 
 Write-Host "== SmartEdit MCP installer ==" -ForegroundColor Cyan
 
-# 0) .NET 10 runtime — обязателен (единственный ассет — framework-dependent)
+# 0) .NET 10 runtime is required (the only asset is framework-dependent)
 try { $null = & dotnet --list-runtimes 2>$null | Select-String 'Microsoft.NETCore.App.* 10\.' }
 catch {}
 if (-not $?) {

@@ -124,7 +124,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
-  # Дистрибутивная политика (2026-11-11): ЕДИНСТВЕННЫЙ артефакт — framework-dependent (требуется
-  # .NET 10 runtime). AOT — в отставке (issue #7, консилиум); self-contained — тоже: почти у всех
-  # целевых машин рантайм есть или ставится одной ссылкой, а 37-85МБ ассет ради исключений — налог
-  # на каждый релиз и апдейтер. Flavors в UpdateCheck оставлены как мёртвый код.
+  # Distribution policy (2026-11-11): the ONLY artifact is framework-dependent (requires the
+  # .NET 10 runtime). AOT is shelved (issue #7, design review); self-contained too: nearly all
+  # target machines have the runtime or install it with one link, and a 37-85MB asset for the
+  # exceptions is a tax on every release and the updater. Flavors stay in UpdateCheck as dead code.

@@ -79,7 +79,7 @@ public static partial class SyntaxGate {
                 Strikes[langName] = strikes;
                 if (strikes >= 3 && Disabled.Add(langName))
                     Log.Warn($"syntax gate: {langName} отключён до рестарта (3 таймаута подряд)");
-                return Result.Off("degraded"); // тихий pass = дыра; блокируем с force-путём (решение консилиума)
+                return Result.Off("degraded"); // тихий pass = дыра; блокируем с force-путём (решение дизайн-ревью)
             }
             Strikes[langName] = 0;
             return new Result("pass", task.Result);

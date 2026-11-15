@@ -138,7 +138,7 @@ public sealed class EditSession : IDisposable {
     bool _createParents;   // create_parents:true — недостающие папки создаются при save (не в create)
 
     /// <summary>
-    /// #21 (консилиум 2026-11-14): create(path, content) — пустая/сеяная RAM-сессия поверх несуществующего
+    /// #21 (дизайн-ревью 2026-11-14): create(path, content) — пустая/сеяная RAM-сессия поверх несуществующего
     /// файла. Существующий файл → already_exists (не скрытый truncate). Дельта-гейт на первом save:
     /// baseline пустой → все синтаксические ошибки новые (жёсткий блок, force — осознанный путь).
     /// </summary>

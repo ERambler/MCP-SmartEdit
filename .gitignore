@@ -7,3 +7,4 @@ win-x64/
 *.smartedit-shadow
 *.smartedit-tmp
 .zcode/
+docs/

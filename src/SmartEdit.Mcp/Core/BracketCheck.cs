@@ -3,7 +3,7 @@ using SmartEdit.Mcp.Core.SymbolScan;
 namespace SmartEdit.Mcp.Core;
 
 /// <summary>
-/// Баланс скобок {} [] () для кода и &lt;&gt;-тегов для XML/HTML (по консилиуму:
+/// Баланс скобок {} [] () для кода и &lt;&gt;-тегов для XML/HTML (дизайн-ревью:
 /// &lt;&gt; в C# — lost cause из-за generics, проверяем только пары {}[]()); строки/комментарии/
 /// интерполяция исключает стейт-машина CodeStrip (скобки кода внутри {дырок} $"…" считаются).
 /// Строки подаются лениво (lineAt): полный чек гиганта не материализует файл в RAM.
@@ -32,7 +32,7 @@ public static class BracketCheck {
         bool markup = SymbolDispatcher.KindOf(path) == SymbolLang.Markup;
         var problems = new List<Diag>();
         var stack = new Stack<(char Open, int Line)>();
-        // v0.8: универсальный профильный лексер (консилиум-дизайн): raw/triple/template/f-string/R"()"
+        // v0.8: универсальный профильный лексер (дизайн-ревью): raw/triple/template/f-string/R"()"
         var profile = LiteralLexer.ForPath(path);
         var lex = new LexerState();
 

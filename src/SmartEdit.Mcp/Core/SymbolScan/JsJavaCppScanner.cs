@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 namespace SmartEdit.Mcp.Core.SymbolScan;
 
 /// <summary>
-/// JS/TS, Java, C/C++: грубее C#-сканера (по консилиуму — навигационная точность).
+/// JS/TS, Java, C/C++: грубее C#-сканера (дизайн-ревью: навигационная точность).
 /// Классы/функции/методы по регекспам + глубина {}; JSDoc/JavaDoc первая строка как doc.
 /// </summary>
 public static partial class JsJavaCppScanner {

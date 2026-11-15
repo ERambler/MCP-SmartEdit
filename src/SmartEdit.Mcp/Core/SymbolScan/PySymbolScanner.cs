@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 namespace SmartEdit.Mcp.Core.SymbolScan;
 
 /// <summary>
-/// Python: indent-сканер — самый надёжный из эвристических (консилиум).
+/// Python: indent-сканер — самый надёжный из эвристических (дизайн-ревью).
 /// class / def / async def с телом до строки той же или меньшей вложенности; docstring — первая строка.
 /// </summary>
 public static partial class PySymbolScanner {

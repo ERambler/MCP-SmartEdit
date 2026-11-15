@@ -6,7 +6,7 @@ namespace SmartEdit.Mcp.Core.SymbolScan;
 /// <summary>
 /// C#-структура: namespace/типы/члены с номерами строк, XML-doc (первая содержательная строка
 /// ///-блока), using-список. Регексп+глубина {} — навигационная точность, не компиляторная
-/// (известно: partial-дубликаты, редкие expression-bodied; консилиум 2026-11-11: достаточно для агента).
+/// (известно: partial-дубликаты, редкие expression-bodied; дизайн-ревью 2026-11-11: достаточно для навигации).
 /// </summary>
 public static partial class CsSymbolScanner {
     const int SigMax = 120;

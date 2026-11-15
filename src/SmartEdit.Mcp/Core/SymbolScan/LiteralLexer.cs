@@ -2,7 +2,7 @@ using System.Text;
 
 namespace SmartEdit.Mcp.Core.SymbolScan;
 
-// ── v0.8: универсальный лексер литералов/комментариев (консилиум deepseek+google+qwen, 2026-11-11) ──
+// ── v0.8: универсальный лексер литералов/комментариев (дизайн-ревью 2026-11-11) ──
 // Канон: Roslyn ScanRawStringLiteral (run-length кавычек) + interpolationStack (дырки),
 // TextMate begin/end/patterns (декларативные формы), tree-sitter lexer-state-as-int.
 // Один Scanner + профили языков; скобки считаются ТОЛЬКО в Code и HoleCode.
@@ -45,7 +45,7 @@ public sealed class LexerState {
     public List<(byte Kind, int FormId, int CloseRun, int Dollars, int HoleDepth, string? CppDelim)>? Ctx;
     public LexerState Clone() => (LexerState)MemberwiseClone();
 
-    /// <summary>Войти в форму/комментарий ИЗ дырки — сохранить контекст (консилиум: interpolationStack).</summary>
+    /// <summary>Войти в форму/комментарий ИЗ дырки — сохранить контекст (дизайн-ревью: interpolationStack).</summary>
     public void PushCtx() {
         Ctx ??= new(3);
         Ctx.Add((Kind, FormId, CloseRun, Dollars, HoleDepth, CppDelim));
