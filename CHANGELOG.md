@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.13.4 (2026-11-18)
+
+- **Implied target for weak models (#36)**: with no `session_id` and no `path` and exactly ONE document open, every tool resolves to that document (freshest attachment re-touched, the fallback is journaled); zero open documents → an actionable `unknown_session` ("pass path/session_id, or open(path) first"); 2+ open → an honest `ambiguous_target` with the count. Strong models are unaffected; an implied write can never mis-target (the 2+ case refuses instead of guessing). Found in the field: a 9B local model repeated an identical malformed `insert_after` 7 times without learning from structured errors. +4 selftest locks → **323 checks** + smoke 67, ALL PASS.
+
 ## v0.13.3 (2026-11-15)
 
 **#35: tree(deep) polish** — three rough edges found by a live A/B pilot of v0.13.2 on this very repo (73 files). One pass, no contract changes.
