@@ -18,7 +18,7 @@ sealed class HelpTool : HiddenTool {
         const string page = """
 SMARTEDIT — GOLDEN RULES
 - lines are 1-based, INCLUSIVE; end = start-1 => INSERT before start; empty file: replace_lines(1, 0, text)
-- path-first (v0.9): EVERY tool accepts path instead of session_id — open is optional, no ritual; both given => ambiguous_target
+- path-first (v0.9): every tool takes path or session_id — no ritual; both => ambiguous_target; NEITHER => the one open doc (#36)
 - expected_rev is OPTIONAL (omit = the last rev you observed — the server tracks it); pin it to assert no peer raced you
 - expect_old = exact current text of the range — your guard against your own wrong-line math
 - stale rev auto-recovers by default (response: recovered:true + intervening) — usually you do nothing

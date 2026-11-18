@@ -1291,6 +1291,39 @@ static class V090PathTxn {
         catch (ToolException t) { amb = t; }
         SelfTest.CheckPublic(amb is not null && amb.Kind == "ambiguous_target", "path-mode: session_id + path → ambiguous_target");
 
+        // (a2) #36 single-document fallback: БЕЗ session_id и path — единственный открытый документ = однозначная цель
+        foreach (var att in Sessions.Map.Values.ToList()) { // чистый лист: гасим все вложения от предыдущих тестов
+            var (_, disp0, _) = Sessions.Detach(att.Id, discard: true);
+            if (disp0) att.Doc.Dispose();
+        }
+        string fb = Path.Combine(dir, "fallback.txt");
+        File.WriteAllText(fb, "one" + nl + "two" + nl + "three" + nl);
+        _ = tools.CallAsync("open", JsonDocument.Parse($$"""{"path":"{{J(fb)}}"}""").RootElement.Clone(), default).GetAwaiter().GetResult();
+        string fbRaw = tools.CallAsync("insert_after", JsonDocument.Parse("""{"line":3,"text":"four"}""").RootElement.Clone(), default).GetAwaiter().GetResult();
+        var fbMut = JsonSerializer.Deserialize<MutationResult>(fbRaw, RpcJson.Default.MutationResult)!;
+        SelfTest.CheckPublic(fbMut.Rev == 1, "fallback: insert_after без session_id/path → единственный открытый документ (rev 1)");
+        _ = tools.CallAsync("save", JsonDocument.Parse("{}").RootElement.Clone(), default).GetAwaiter().GetResult();
+        SelfTest.CheckPublic(File.ReadAllText(fb).Contains("four"), "fallback: save без цели → тот же документ уходит на диск");
+
+        // два открытых документа без цели → честный ambiguous_target
+        string fb2 = Path.Combine(dir, "fallback2.txt");
+        File.WriteAllText(fb2, "x" + nl);
+        _ = tools.CallAsync("open", JsonDocument.Parse($$"""{"path":"{{J(fb2)}}"}""").RootElement.Clone(), default).GetAwaiter().GetResult();
+        ToolException? ambDocs = null;
+        try { _ = tools.CallAsync("insert_after", JsonDocument.Parse("""{"line":0,"text":"y"}""").RootElement.Clone(), default).GetAwaiter().GetResult(); }
+        catch (ToolException t) { ambDocs = t; }
+        SelfTest.CheckPublic(ambDocs is not null && ambDocs.Kind == "ambiguous_target", "fallback: 2 открытых документа без цели → ambiguous_target");
+
+        // ноль открытых документов → unknown_session с подсказкой
+        foreach (var att in Sessions.Map.Values.ToList()) {
+            var (_, disp1, _) = Sessions.Detach(att.Id, discard: true);
+            if (disp1) att.Doc.Dispose();
+        }
+        ToolException? noDocs = null;
+        try { _ = tools.CallAsync("show", JsonDocument.Parse("""{"start":1,"end":1}""").RootElement.Clone(), default).GetAwaiter().GetResult(); }
+        catch (ToolException t) { noDocs = t; }
+        SelfTest.CheckPublic(noDocs is not null && noDocs.Kind == "unknown_session", "fallback: нет открытых документов → unknown_session");
+
         // (b) edit_transaction all-or-nothing: битый якорь в файле 3 → отменено ВСЁ, диск не тронут
         string t1 = Path.Combine(dir, "tx1.txt"); File.WriteAllText(t1, "one" + nl);
         string t2 = Path.Combine(dir, "tx2.txt"); File.WriteAllText(t2, "two" + nl);

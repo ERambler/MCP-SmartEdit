@@ -130,13 +130,33 @@ static class Sessions {
     /// v0.9 (#3): session_id ИЛИ path — инструменты принимают путь напрямую, сервер сам подключается
     /// к общему документу (переиспользуемый path-attachment "p:…"). Ритуал open умирает: правки по пути
     /// без предварительного open; ответ эхом возвращает sessionId для продолжения. Оба сразу → ambiguous_target.
+    /// Ни один не задан → single-document fallback (#36): если в процессе открыт ровно ОДИН документ, это
+    /// однозначная цель — работаем с ним; 0 документов → unknown_session с подсказкой, N&gt;1 → ambiguous_target.
     /// </summary>
     public static Attachment Resolve(string? sessionId, string? path) {
         if (sessionId is not null && path is not null)
             throw new ToolException("ambiguous_target", "pass either session_id or path, not both");
         lock (Map) { PruneStale(); EvictIdle(); } // #24: гигиена на КАЖДОМ вызове — повторные вызовы тоже вытесняют (без таймеров)
         if (sessionId is not null) return Get(sessionId);
-        if (string.IsNullOrEmpty(path)) throw new ToolException(ToolException.UnknownSession, "session_id or path is required");
+        if (string.IsNullOrEmpty(path)) {
+            // #36: слабые LLM (например, 9B-дистилляты) «забывают» session_id/path в мутаторах и падают
+            // в unknown_session бесконечно, не извлекая урока из структурной ошибки. Если открыт ровно
+            // ОДИН документ — это однозначная цель: работаем с ним; иначе ошибки остаются честными.
+            lock (Map) {
+                var docs = Map.Values.Select(a => a.Doc).Distinct().ToList();
+                if (docs.Count == 1) {
+                    var single = docs[0];
+                    var reuse = Map.Values.Where(a => a.Doc == single).OrderByDescending(a => a.LastSeen).First();
+                    Touch(reuse);
+                    reuse.LastSeenRev = single.Rev;
+                    SmartEdit.Mcp.Infra.Log.Info($"session:resolve fallback → single open document, attachment {reuse.Id}, path={single.Path}");
+                    return reuse;
+                }
+                if (docs.Count == 0)
+                    throw new ToolException(ToolException.UnknownSession, "no open session — pass path/session_id, or open(path) first");
+                throw new ToolException("ambiguous_target", $"{docs.Count} documents are open — pass session_id or path to pick one");
+            }
+        }
         string canonical = System.IO.Path.GetFullPath(path);
         if (ByPath.TryGetValue(canonical, out var doc)) {
             var reuse = Map.Values.FirstOrDefault(a => a.Doc == doc && a.Id.StartsWith("p:"));
